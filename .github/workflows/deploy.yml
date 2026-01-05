@@ -1,0 +1,68 @@
+name: Build and Deploy
+
+on:
+  push:
+    branches:
+      - main
+  workflow_dispatch:
+
+env:
+  DOCKER_IMAGE: ${{ secrets.DOCKER_HUB_IMAGE }}
+
+jobs:
+  build-and-deploy:
+    runs-on: ubuntu-latest
+    
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Log in to Docker Hub
+        uses: docker/login-action@v3
+        with:
+          username: ${{ secrets.DOCKER_USERNAME }}
+          password: ${{ secrets.DOCKER_PASSWORD }}
+
+      - name: Build and push Docker image
+        uses: docker/build-push-action@v5
+        with:
+          context: .
+          push: true
+          tags: ${{ secrets.DOCKER_HUB_IMAGE }}:latest
+          build-args: |
+            NEXT_PUBLIC_API_URL=${{ secrets.NEXT_PUBLIC_API_URL }}
+          cache-from: type=registry,ref=${{ secrets.DOCKER_HUB_IMAGE }}:buildcache
+          cache-to: type=registry,ref=${{ secrets.DOCKER_HUB_IMAGE }}:buildcache,mode=max
+
+      - name: Deploy to EC2
+        uses: appleboy/ssh-action@v1.0.3
+        with:
+          host: ${{ secrets.EC2_HOST }}
+          username: ${{ secrets.EC2_USER }}
+          key: ${{ secrets.EC2_SSH_KEY }}
+          script: |
+            # Log in to Docker Hub
+            echo "${{ secrets.DOCKER_PASSWORD }}" | docker login -u "${{ secrets.DOCKER_USERNAME }}" --password-stdin
+            
+            # Pull the latest image
+            docker pull ${{ secrets.DOCKER_HUB_IMAGE }}:latest
+            
+            # Stop and remove old container if it exists
+            docker stop inventory-app || true
+            docker rm inventory-app || true
+            
+            # Run the new container
+            docker run -d \
+              --name inventory-app \
+              --restart unless-stopped \
+              -p 3052:3000 \
+              -e NEXT_PUBLIC_API_URL=${{ secrets.NEXT_PUBLIC_API_URL }} \
+              -e NODE_ENV=production \
+              ${{ secrets.DOCKER_HUB_IMAGE }}:latest
+            
+            # Clean up unused images
+            docker image prune -f
+
