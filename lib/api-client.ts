@@ -40,13 +40,16 @@ class ApiClient {
     const token = this.getToken()
     const url = `${this.baseUrl}${endpoint}`
 
-    const headers: HeadersInit = {
+    const headers: Record<string, string> = {
       "Content-Type": "application/json",
-      ...options.headers,
+      ...(options.headers as Record<string, string>),
     }
 
-    if (token && !options.headers?.Authorization) {
-      headers.Authorization = `Bearer ${token}`
+    if (token) {
+      const existingHeaders = options.headers as Record<string, string> | undefined
+      if (!existingHeaders?.Authorization) {
+        headers.Authorization = `Bearer ${token}`
+      }
     }
 
     const config: RequestInit = {
@@ -91,8 +94,16 @@ class ApiClient {
           }
         }
 
+        // Ensure error message is always a string
+        let errorMessage = `HTTP error! status: ${response.status}`
+        if (data.error) {
+          errorMessage = typeof data.error === 'string' 
+            ? data.error 
+            : (data.error.message || JSON.stringify(data.error))
+        }
+
         throw new ApiClientError(
-          data.error || `HTTP error! status: ${response.status}`,
+          errorMessage,
           response.status,
           data
         )
@@ -167,8 +178,15 @@ class ApiClient {
               localStorage.removeItem("auth_user")
             }
           }
+          // Ensure error message is always a string
+          let errorMessage = `HTTP error! status: ${response.status}`
+          if (responseData.error) {
+            errorMessage = typeof responseData.error === 'string' 
+              ? responseData.error 
+              : (responseData.error.message || JSON.stringify(responseData.error))
+          }
           throw new ApiClientError(
-            responseData.error || `HTTP error! status: ${response.status}`,
+            errorMessage,
             response.status,
             responseData
           )
@@ -234,8 +252,15 @@ class ApiClient {
               localStorage.removeItem("auth_user")
             }
           }
+          // Ensure error message is always a string
+          let errorMessage = `HTTP error! status: ${response.status}`
+          if (responseData.error) {
+            errorMessage = typeof responseData.error === 'string' 
+              ? responseData.error 
+              : (responseData.error.message || JSON.stringify(responseData.error))
+          }
           throw new ApiClientError(
-            responseData.error || `HTTP error! status: ${response.status}`,
+            errorMessage,
             response.status,
             responseData
           )

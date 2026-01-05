@@ -26,7 +26,7 @@ export function formatImageUrl(imageUrl?: string | null): string {
 
   // Otherwise, it's likely an API-uploaded image filename
   // Construct the full URL using the API base URL
-  const apiBaseUrl = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:3001/api'
+  const apiBaseUrl = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:3050/api'
   const uploadsBaseUrl = apiBaseUrl.replace('/api', '/uploads')
   return `${uploadsBaseUrl}/${imageUrl}`
 }

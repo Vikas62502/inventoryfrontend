@@ -15,15 +15,15 @@ I've enhanced the error handling in the login page to provide clearer error mess
 - Firewall blocking the connection
 
 **Solutions:**
-1. Check if your API server is running on `http://localhost:3001`
+1. Check if your API server is running on `http://localhost:3050`
 2. Verify the API URL in your `.env.local` file:
    ```env
-   NEXT_PUBLIC_API_URL=http://localhost:3001/api
+   NEXT_PUBLIC_API_URL=http://localhost:3050/api
    ```
 3. Check browser console (F12) for detailed error messages
 4. Test the API endpoint directly in your browser or Postman:
    ```
-   POST http://localhost:3001/api/auth/login
+   POST http://localhost:3050/api/auth/login
    Content-Type: application/json
    
    {
@@ -95,7 +95,7 @@ I've enhanced the error handling in the login page to provide clearer error mess
 3. **Verify API Server**
    ```bash
    # Test if API server is running
-   curl http://localhost:3001/api/auth/login \
+   curl http://localhost:3050/api/auth/login \
      -X POST \
      -H "Content-Type: application/json" \
      -d '{"username":"superadmin","password":"admin123"}'
@@ -116,7 +116,7 @@ lsof -i :3001
 
 ✅ Is the API URL correct?
 - Open browser console
-- You should see: `API URL: http://localhost:3001/api`
+- You should see: `API URL: http://localhost:3050/api`
 
 ✅ Are credentials correct?
 - Try default: `superadmin` / `admin123`

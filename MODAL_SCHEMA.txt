@@ -7,7 +7,7 @@
 This document describes the complete schema structure for all modals used in the 
 application, matching the backend Sequelize models and API endpoints.
 
-Base URL: http://localhost:3000/api (or http://localhost:3001/api based on .env)
+Base URL: http://localhost:3000/api (or http://localhost:3050/api based on .env)
 
 ================================================================================
 1. ADDRESS SCHEMA (Database Model: Address)

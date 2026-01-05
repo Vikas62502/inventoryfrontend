@@ -1,26 +1,26 @@
 import { apiClient, type ApiClientError } from "./api-client"
 import type { User, LoginResponse, LoginCredentials } from "./auth"
 
-// Auth API
+// Auth API - Inventory System
 export const authApi = {
   async login(credentials: LoginCredentials): Promise<LoginResponse> {
-    return apiClient.post<LoginResponse>("/auth/login", credentials)
+    return apiClient.post<LoginResponse>("/inventory-auth/login", credentials)
   },
 
   async getCurrentUser(): Promise<User> {
-    return apiClient.get<User>("/auth/me")
+    return apiClient.get<User>("/inventory-auth/me")
   },
 
   async forgotPassword(username: string): Promise<{ message: string; resetToken?: string; expiresIn?: string }> {
-    return apiClient.post<{ message: string; resetToken?: string; expiresIn?: string }>("/auth/forgot-password", { username })
+    return apiClient.post<{ message: string; resetToken?: string; expiresIn?: string }>("/inventory-auth/forgot-password", { username })
   },
 
   async resetPassword(resetToken: string, newPassword: string): Promise<{ message: string }> {
-    return apiClient.post<{ message: string }>("/auth/reset-password", { resetToken, newPassword })
+    return apiClient.post<{ message: string }>("/inventory-auth/reset-password", { resetToken, newPassword })
   },
 
   async changePassword(currentPassword: string, newPassword: string): Promise<{ message: string }> {
-    return apiClient.post<{ message: string }>("/auth/change-password", { currentPassword, newPassword })
+    return apiClient.post<{ message: string }>("/inventory-auth/change-password", { currentPassword, newPassword })
   },
 }
 

@@ -9,10 +9,10 @@ This document explains how the frontend is integrated with the backend API.
 Create a `.env.local` file in the root directory with the following:
 
 ```env
-NEXT_PUBLIC_API_URL=http://localhost:3001/api
+NEXT_PUBLIC_API_URL=http://localhost:3050/api
 ```
 
-If not set, the default API URL is `http://localhost:3001/api`.
+If not set, the default API URL is `http://localhost:3050/api`.
 
 ## Architecture
 
@@ -181,8 +181,8 @@ await productsApi.create({
 
 ## Testing
 
-1. Ensure your API server is running on `http://localhost:3001`
-2. Create a `.env.local` file with `NEXT_PUBLIC_API_URL=http://localhost:3001/api`
+1. Ensure your API server is running on `http://localhost:3050`
+2. Create a `.env.local` file with `NEXT_PUBLIC_API_URL=http://localhost:3050/api`
 3. Start the Next.js dev server: `npm run dev`
 4. Login with valid credentials (e.g., `superadmin` / `admin123`)
 

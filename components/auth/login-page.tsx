@@ -97,20 +97,23 @@ export default function LoginPage({ onLogin }: LoginPageProps) {
       // Check if it's an ApiClientError by checking for status property
       if (err && typeof err.status === 'number') {
         // This is an ApiClientError
-        const apiError = err.data?.error || err.message || ""
-
+        // Ensure apiError is always a string
+        const apiErrorRaw = err.data?.error || err.message || ""
+        const apiError = typeof apiErrorRaw === 'string' ? apiErrorRaw : JSON.stringify(apiErrorRaw)
+        const apiErrorLower = apiError.toLowerCase()
+        
         if (err.status === 401) {
           // Handle specific error messages
-          if (apiError.toLowerCase().includes("inactive") || apiError.toLowerCase().includes("account is inactive")) {
+          if (apiErrorLower.includes("inactive") || apiErrorLower.includes("account is inactive")) {
             errorMessage = "Your account is inactive and needs approval. Please contact your administrator or account manager to activate your account."
           } else {
             errorMessage = apiError || "Invalid username or password."
           }
         } else if (err.status === 0 || err.message?.includes("Network error") || err.message?.includes("Failed to fetch")) {
-          errorMessage = "Unable to connect to server. Please check if the API server is running at " + (process.env.NEXT_PUBLIC_API_URL || "http://localhost:3001/api")
+          errorMessage = "Unable to connect to server. Please check if the API server is running at " + (process.env.NEXT_PUBLIC_API_URL || "http://localhost:3050/api")
         } else {
           // Handle other error statuses
-          if (apiError.toLowerCase().includes("inactive") || apiError.toLowerCase().includes("account is inactive")) {
+          if (apiErrorLower.includes("inactive") || apiErrorLower.includes("account is inactive")) {
             errorMessage = "Your account is inactive and needs approval. Please contact your administrator or account manager to activate your account."
           } else {
             errorMessage = apiError || err.message || `Server error (${err.status}). Please try again.`
