@@ -27,7 +27,7 @@ export default function LoginPage({ onLogin }: LoginPageProps) {
   const [cardTransform, setCardTransform] = useState({ x: 0, y: 0 })
 
   useEffect(() => {
-    const apiUrl = process.env.NEXT_PUBLIC_API_URL || "http://localhost:3001/api"
+    const apiUrl = process.env.NEXT_PUBLIC_API_URL || "http://localhost:3050/api"
     console.log("API URL:", apiUrl)
   }, [])
 
@@ -75,7 +75,7 @@ export default function LoginPage({ onLogin }: LoginPageProps) {
       }
 
       const response = await authApi.login({ username: username.trim(), password })
-      
+
       // Store token and user data
       authService.setToken(response.token)
       authService.setUser(response.user)
@@ -91,14 +91,14 @@ export default function LoginPage({ onLogin }: LoginPageProps) {
         data: err?.data,
         stack: err?.stack
       })
-      
+
       let errorMessage = "Login failed. Please check your credentials."
-      
+
       // Check if it's an ApiClientError by checking for status property
       if (err && typeof err.status === 'number') {
         // This is an ApiClientError
         const apiError = err.data?.error || err.message || ""
-        
+
         if (err.status === 401) {
           // Handle specific error messages
           if (apiError.toLowerCase().includes("inactive") || apiError.toLowerCase().includes("account is inactive")) {
@@ -145,7 +145,7 @@ export default function LoginPage({ onLogin }: LoginPageProps) {
           errorMessage = apiError
         }
       }
-      
+
       setError(errorMessage)
     } finally {
       setIsLoading(false)
@@ -155,7 +155,7 @@ export default function LoginPage({ onLogin }: LoginPageProps) {
   return (
     <div className="min-h-screen bg-gradient-to-br from-slate-950 via-black to-slate-900 flex items-center justify-center p-3 sm:p-4 relative overflow-hidden">
       {/* Custom Cursor Effect - Hidden on mobile */}
-      <div 
+      <div
         className="hidden md:block fixed pointer-events-none z-50 mix-blend-difference transition-all duration-300 ease-out"
         style={{
           left: `${mousePosition.x}px`,
@@ -170,7 +170,7 @@ export default function LoginPage({ onLogin }: LoginPageProps) {
       {/* Animated Background Elements */}
       <div className="absolute inset-0 overflow-hidden pointer-events-none">
         {/* Gradient Orbs - Follow cursor */}
-        <div 
+        <div
           className="absolute w-96 h-96 bg-blue-500/10 rounded-full blur-3xl transition-all duration-1000 ease-out"
           style={{
             left: `${mousePosition.x - 192}px`,
@@ -178,7 +178,7 @@ export default function LoginPage({ onLogin }: LoginPageProps) {
             transform: 'translate(-50%, -50%)'
           }}
         ></div>
-        <div 
+        <div
           className="absolute w-96 h-96 bg-cyan-500/10 rounded-full blur-3xl transition-all duration-1500 ease-out delay-300"
           style={{
             left: `${mousePosition.x - 192}px`,
@@ -186,10 +186,10 @@ export default function LoginPage({ onLogin }: LoginPageProps) {
             transform: 'translate(-50%, -50%) scale(1.2)'
           }}
         ></div>
-        
+
         {/* Grid Pattern */}
         <div className="absolute inset-0 bg-[linear-gradient(to_right,#1e293b_1px,transparent_1px),linear-gradient(to_bottom,#1e293b_1px,transparent_1px)] bg-[size:4rem_4rem] opacity-20"></div>
-        
+
         {/* Sparkle Effects */}
         <div className="absolute top-20 left-20 w-2 h-2 bg-blue-400 rounded-full animate-ping opacity-75"></div>
         <div className="absolute top-40 right-32 w-1.5 h-1.5 bg-cyan-400 rounded-full animate-ping opacity-75 delay-500"></div>
@@ -199,7 +199,7 @@ export default function LoginPage({ onLogin }: LoginPageProps) {
       <div className="w-full max-w-md relative z-10">
         {/* Logo Section with Enhanced Design */}
         <div className="text-center mb-4 sm:mb-8 animate-fade-in">
-          <div 
+          <div
             className="inline-flex items-center justify-center mb-3 sm:mb-6 relative md:transition-transform md:duration-300 md:ease-out"
             style={{
               transform: typeof window !== 'undefined' && window.innerWidth >= 768 ? `translate(${logoTransform.x}px, ${logoTransform.y}px)` : 'none'
@@ -209,15 +209,15 @@ export default function LoginPage({ onLogin }: LoginPageProps) {
             <div className="relative group cursor-pointer">
               <div className="absolute inset-0 bg-gradient-to-br from-blue-500/20 to-cyan-500/20 rounded-xl sm:rounded-2xl blur-xl animate-pulse group-hover:scale-110 transition-transform duration-300"></div>
               <div className="relative bg-white/5 backdrop-blur-sm p-2 sm:p-4 rounded-xl sm:rounded-2xl border border-white/10 shadow-2xl group-hover:border-blue-500/50 transition-all duration-300 group-hover:shadow-blue-500/20">
-                <img 
-                  src="https://res.cloudinary.com/du0cxgoic/image/upload/v1753789133/logo_Chairbord_Solar_1_1_avkjps.png" 
-                  alt="Chairbord Solar Logo" 
+                <img
+                  src="https://res.cloudinary.com/du0cxgoic/image/upload/v1753789133/logo_Chairbord_Solar_1_1_avkjps.png"
+                  alt="Chairbord Solar Logo"
                   className="h-12 sm:h-16 w-auto object-contain transition-transform duration-300 group-hover:scale-105"
                 />
               </div>
             </div>
           </div>
-          
+
           <p className="text-slate-400 text-xs sm:text-sm md:text-base flex items-center justify-center gap-1 sm:gap-2 px-2">
             <Sparkles className="w-3 h-3 sm:w-4 sm:h-4 text-blue-400" />
             <span className="hidden xs:inline">Solar Inventory Management System</span>
@@ -227,23 +227,23 @@ export default function LoginPage({ onLogin }: LoginPageProps) {
         </div>
 
         {/* Login Card with Enhanced Design */}
-        <Card 
+        <Card
           className="bg-slate-900/80 backdrop-blur-xl border border-slate-700/50 shadow-2xl relative overflow-hidden animate-fade-in-up md:transition-transform md:duration-300 md:ease-out"
           style={{
             transform: typeof window !== 'undefined' && window.innerWidth >= 768 ? `translate(${cardTransform.x}px, ${cardTransform.y}px) rotateX(${cardTransform.y * 0.1}deg) rotateY(${cardTransform.x * 0.1}deg)` : 'none'
           }}
         >
           {/* Card Glow Effect - Follows cursor - Hidden on mobile */}
-          <div 
+          <div
             className="hidden md:block absolute inset-0 bg-gradient-to-r from-blue-500/10 via-cyan-500/10 to-blue-500/10 transition-opacity duration-500 pointer-events-none"
             style={{
               opacity: 0.5,
               background: `radial-gradient(600px circle at ${mousePosition.x}px ${mousePosition.y}px, rgba(59, 130, 246, 0.15), rgba(6, 182, 212, 0.1), transparent 40%)`
             }}
           ></div>
-          
+
           {/* Cursor glow spot - Hidden on mobile */}
-          <div 
+          <div
             className="hidden md:block absolute w-64 h-64 rounded-full blur-3xl pointer-events-none transition-all duration-700 ease-out opacity-30"
             style={{
               left: `${mousePosition.x - 128}px`,
@@ -252,7 +252,7 @@ export default function LoginPage({ onLogin }: LoginPageProps) {
               background: 'radial-gradient(circle, rgba(59, 130, 246, 0.4), rgba(6, 182, 212, 0.3), transparent 70%)'
             }}
           ></div>
-          
+
           {/* Card Content */}
           <div className="relative p-5 sm:p-8 md:p-10">
             <div className="text-center mb-6 sm:mb-8">

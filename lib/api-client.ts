@@ -1,4 +1,6 @@
-const API_BASE_URL = process.env.NEXT_PUBLIC_API_URL || "http://localhost:3001/api"
+const API_BASE_URL = process.env.NEXT_PUBLIC_API_URL || "http://localhost:3050/api"
+console.log("Environment NEXT_PUBLIC_API_URL:", process.env.NEXT_PUBLIC_API_URL)
+console.log("API_BASE_URL:", API_BASE_URL)
 
 export interface ApiError {
   error: string
@@ -101,7 +103,7 @@ class ApiClient {
       if (error instanceof ApiClientError) {
         throw error
       }
-      
+
       // Handle network errors
       if (error instanceof TypeError && error.message.includes("fetch")) {
         throw new ApiClientError(
@@ -109,7 +111,7 @@ class ApiClient {
           0
         )
       }
-      
+
       throw new ApiClientError(
         error instanceof Error ? error.message : "Network error occurred",
         0
@@ -145,7 +147,7 @@ class ApiClient {
       try {
         const response = await fetch(url, config)
         const contentType = response.headers.get("content-type")
-        
+
         if (!contentType?.includes("application/json")) {
           if (!response.ok) {
             throw new ApiClientError(
@@ -212,7 +214,7 @@ class ApiClient {
       try {
         const response = await fetch(url, config)
         const contentType = response.headers.get("content-type")
-        
+
         if (!contentType?.includes("application/json")) {
           if (!response.ok) {
             throw new ApiClientError(
