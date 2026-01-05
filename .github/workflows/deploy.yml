@@ -45,17 +45,17 @@ jobs:
           key: ${{ secrets.EC2_SSH_KEY }}
           script: |
             # Log in to Docker Hub
-            echo "${{ secrets.DOCKER_PASSWORD }}" | docker login -u "${{ secrets.DOCKER_USERNAME }}" --password-stdin
+            echo "${{ secrets.DOCKER_PASSWORD }}" | sudo docker login -u "${{ secrets.DOCKER_USERNAME }}" --password-stdin
             
             # Pull the latest image
-            docker pull ${{ secrets.DOCKER_HUB_IMAGE }}:latest
+            sudo docker pull ${{ secrets.DOCKER_HUB_IMAGE }}:latest
             
             # Stop and remove old container if it exists
-            docker stop inventory-app || true
-            docker rm inventory-app || true
+            sudo docker stop inventory-app || true
+            sudo docker rm inventory-app || true
             
             # Run the new container
-            docker run -d \
+            sudo docker run -d \
               --name inventory-app \
               --restart unless-stopped \
               -p 3052:3000 \
@@ -64,5 +64,5 @@ jobs:
               ${{ secrets.DOCKER_HUB_IMAGE }}:latest
             
             # Clean up unused images
-            docker image prune -f
+            sudo docker image prune -f
 
