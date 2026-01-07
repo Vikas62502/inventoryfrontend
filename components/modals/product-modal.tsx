@@ -281,8 +281,8 @@ export default function ProductModal({ product, onClose, onSave }: ProductModalP
   }
 
   return (
-    <div className="fixed inset-0 bg-black/50 backdrop-blur-sm flex items-center justify-center p-2 sm:p-4 z-50 overflow-y-auto">
-      <Card className="bg-slate-800 border-slate-700 p-4 sm:p-6 lg:p-8 max-w-[95%] sm:max-w-lg w-full my-4 sm:my-8">
+    <div className="fixed inset-0 bg-black/50 backdrop-blur-sm flex items-center justify-center p-2 sm:p-4 z-50">
+      <Card className="bg-slate-800 border-slate-700 p-4 sm:p-6 lg:p-8 max-w-[95%] sm:max-w-lg w-full my-4 sm:my-8 max-h-[95vh] overflow-y-auto">
         <div className="flex items-center justify-between mb-4 sm:mb-6">
           <h2 className="text-xl sm:text-2xl font-bold text-white">{product ? "Edit Product" : "Add New Product"}</h2>
           <button onClick={onClose} className="text-slate-400 hover:text-white transition flex-shrink-0 ml-2">
@@ -333,7 +333,10 @@ export default function ProductModal({ product, onClose, onSave }: ProductModalP
                           <button
                             key={`${cat}-${idx}`}
                             type="button"
-                            onClick={() => handleSelectCategory(cat)}
+                            onMouseDown={(e) => {
+                              e.preventDefault()
+                              handleSelectCategory(cat)
+                            }}
                             className="w-full text-left px-4 py-2 text-sm text-white hover:bg-slate-700 transition-colors"
                           >
                             {cat}
@@ -351,7 +354,10 @@ export default function ProductModal({ product, onClose, onSave }: ProductModalP
                     <div className="border-t border-slate-600">
                       <button
                         type="button"
-                        onClick={handleAddCategory}
+                        onMouseDown={(e) => {
+                          e.preventDefault()
+                          handleAddCategory()
+                        }}
                         disabled={isAddingCategory}
                         className="w-full text-left px-4 py-2 text-sm text-blue-400 hover:bg-slate-700 transition-colors flex items-center gap-2 disabled:opacity-50"
                       >
@@ -420,7 +426,10 @@ export default function ProductModal({ product, onClose, onSave }: ProductModalP
                           <button
                             key={prod.id}
                             type="button"
-                            onClick={() => handleSelectProduct(prod.name)}
+                            onMouseDown={(e) => {
+                              e.preventDefault()
+                              handleSelectProduct(prod.name)
+                            }}
                             className="w-full text-left px-4 py-2 text-sm text-white hover:bg-slate-700 transition-colors"
                           >
                             {prod.name}
