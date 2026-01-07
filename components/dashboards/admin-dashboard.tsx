@@ -3,7 +3,7 @@
 import { useState, useEffect } from "react"
 import { Card } from "@/components/ui/card"
 import { Button } from "@/components/ui/button"
-import { Plus, CheckCircle, Clock, XCircle, ShoppingCart, AlertCircle, TrendingUp, Loader2, RotateCcw, UserPlus, Search } from "lucide-react"
+import { Plus, CheckCircle, Clock, XCircle, ShoppingCart, AlertCircle, TrendingUp, Loader2, RotateCcw, UserPlus, Search, Package } from "lucide-react"
 import { Tabs, TabsList, TabsTrigger, TabsContent } from "@/components/ui/tabs"
 import AdminStockRequestModal from "@/components/modals/admin-stock-request-modal"
 import EnhancedRequestApprovalModal from "@/components/modals/enhanced-request-approval-modal"
@@ -11,7 +11,8 @@ import StockConfirmationModal from "@/components/modals/stock-confirmation-modal
 import StockReturnModal from "@/components/modals/stock-return-modal"
 import CreateUserModal from "@/components/modals/create-user-modal"
 import { useStockRequestsState } from "@/hooks/use-stock-requests-state"
-import { usersApi, stockReturnsApi, productsApi } from "@/lib/api"
+import { usersApi, stockReturnsApi, productsApi, adminInventoryApi } from "@/lib/api"
+import type { AdminInventory } from "@/lib/api"
 import { authService, type User } from "@/lib/auth"
 import { formatDateISO } from "@/lib/utils"
 import type { StockRequest, StockReturn, Product } from "@/lib/api"
@@ -33,6 +34,7 @@ export default function AdminDashboard({ userName }: AdminDashboardProps) {
   const [searchQuery, setSearchQuery] = useState("")
   const [myAgents, setMyAgents] = useState<User[]>([])
   const [loadingAgents, setLoadingAgents] = useState(true)
+  const [agentsSearchQuery, setAgentsSearchQuery] = useState("")
   
   // Stock returns state
   const [stockReturns, setStockReturns] = useState<StockReturn[]>([])
@@ -40,6 +42,14 @@ export default function AdminDashboard({ userName }: AdminDashboardProps) {
   const [processingReturnIds, setProcessingReturnIds] = useState<Set<string>>(new Set())
   const [returnsSearchQuery, setReturnsSearchQuery] = useState("")
   const [returnsProducts, setReturnsProducts] = useState<Record<string, Product>>({})
+  
+  // Products state for stock requests
+  const [requestProducts, setRequestProducts] = useState<Record<string, Product>>({})
+  
+  // Admin inventory state
+  const [adminInventory, setAdminInventory] = useState<AdminInventory[]>([])
+  const [loadingInventory, setLoadingInventory] = useState(true)
+  const [inventorySearchQuery, setInventorySearchQuery] = useState("")
   
   // Tab state
   const [activeTab, setActiveTab] = useState<string>("overview")
@@ -49,23 +59,59 @@ export default function AdminDashboard({ userName }: AdminDashboardProps) {
 
   // Load agents created by this admin
   // Backend automatically filters - admins only receive agents they created
+  const loadMyAgents = async () => {
+    if (!currentUserId) return
+    try {
+      setLoadingAgents(true)
+      // Backend filters agents - admins only see agents they created
+      const myAgentsList = await usersApi.getAll("agent")
+      setMyAgents(myAgentsList)
+    } catch (err) {
+      console.error("Failed to load agents:", err)
+      // On error, set empty array to avoid showing all agents
+      setMyAgents([])
+    } finally {
+      setLoadingAgents(false)
+    }
+  }
+
   useEffect(() => {
-    const loadMyAgents = async () => {
-      if (!currentUserId) return
+    loadMyAgents()
+  }, [currentUserId])
+
+  // Load products for stock requests
+  useEffect(() => {
+    const loadProducts = async () => {
       try {
-        setLoadingAgents(true)
-        // Backend filters agents - admins only see agents they created
-        const myAgentsList = await usersApi.getAll("agent")
-        setMyAgents(myAgentsList)
+        const allProducts = await productsApi.getAll()
+        const productsMap: Record<string, Product> = {}
+        allProducts.forEach(p => {
+          productsMap[p.id] = p
+        })
+        setRequestProducts(productsMap)
       } catch (err) {
-        console.error("Failed to load agents:", err)
-        // On error, set empty array to avoid showing all agents
-        setMyAgents([])
-      } finally {
-        setLoadingAgents(false)
+        console.error("Failed to load products:", err)
       }
     }
-    loadMyAgents()
+    loadProducts()
+  }, [])
+
+  // Load admin inventory
+  useEffect(() => {
+    const loadAdminInventory = async () => {
+      if (!currentUserId) return
+      try {
+        setLoadingInventory(true)
+        const inventory = await adminInventoryApi.getByAdmin(currentUserId)
+        setAdminInventory(inventory)
+      } catch (err) {
+        console.error("Failed to load admin inventory:", err)
+        setAdminInventory([])
+      } finally {
+        setLoadingInventory(false)
+      }
+    }
+    loadAdminInventory()
   }, [currentUserId])
 
   // Load stock returns from agents
@@ -216,6 +262,29 @@ export default function AdminDashboard({ userName }: AdminDashboardProps) {
     (r) => (r.requested_date || r.created_at) ? new Date(r.requested_date || r.created_at).getMonth() === new Date().getMonth() : false,
   ).length
 
+  // Calculate admin's net stock: confirmed stock received - stock transferred to agents
+  const confirmedStockReceived = allRequests
+    .filter((r) => 
+      r.requested_by_id === currentUserId && // Admin's own requests
+      r.requested_from === "super-admin" && // From super-admin
+      r.status === "confirmed" // Confirmed (received)
+    )
+    .reduce((sum, r) => {
+      return sum + (r.items?.reduce((itemSum, item) => itemSum + item.quantity, 0) || 0)
+    }, 0)
+
+  const stockTransferredToAgents = allRequests
+    .filter((r) => 
+      r.requested_from === currentUserId && // Admin sent stock
+      r.requested_by_id !== currentUserId && // To someone else (agents)
+      (r.status === "confirmed" || r.status === "dispatched") // Dispatched or confirmed
+    )
+    .reduce((sum, r) => {
+      return sum + (r.items?.reduce((itemSum, item) => itemSum + item.quantity, 0) || 0)
+    }, 0)
+
+  const adminNetStock = confirmedStockReceived - stockTransferredToAgents
+
   if (requests.loading) {
     return (
       <div className="flex items-center justify-center min-h-[400px]">
@@ -235,82 +304,61 @@ export default function AdminDashboard({ userName }: AdminDashboardProps) {
         <p className="text-slate-400">Welcome {userName}</p>
       </div>
 
-      {/* Key Metrics */}
-      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-6 gap-3 sm:gap-4">
-        <Card className="bg-slate-800 border-slate-700 p-4 sm:p-6">
-          <div className="flex items-center justify-between">
-            <div>
-              <p className="text-slate-400 text-sm mb-2">Pending</p>
-              <p className="text-2xl sm:text-3xl font-bold text-amber-500">{pending}</p>
+      {/* Key Metrics - Clean and Responsive */}
+      <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-3 sm:gap-4">
+        <Card className="bg-slate-800 border-slate-700 p-3 sm:p-4">
+          <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-2">
+            <div className="flex-1 min-w-0">
+              <p className="text-slate-400 text-xs sm:text-sm mb-1">Pending</p>
+              <p className="text-xl sm:text-2xl font-bold text-amber-500">{pending}</p>
             </div>
-            <Clock className="w-6 h-6 sm:w-8 sm:h-8 text-amber-500 opacity-50 flex-shrink-0" />
+            <Clock className="w-5 h-5 sm:w-6 sm:h-6 text-amber-500 opacity-50 flex-shrink-0" />
           </div>
         </Card>
-        <Card className="bg-slate-800 border-slate-700 p-6">
-          <div className="flex items-center justify-between">
-            <div>
-              <p className="text-slate-400 text-sm mb-2">Approved</p>
-              <p className="text-2xl sm:text-3xl font-bold text-green-500">{approved}</p>
+        <Card className="bg-slate-800 border-slate-700 p-3 sm:p-4">
+          <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-2">
+            <div className="flex-1 min-w-0">
+              <p className="text-slate-400 text-xs sm:text-sm mb-1">Approved</p>
+              <p className="text-xl sm:text-2xl font-bold text-green-500">{approved}</p>
             </div>
-            <CheckCircle className="w-6 h-6 sm:w-8 sm:h-8 text-green-500 opacity-50 flex-shrink-0" />
+            <CheckCircle className="w-5 h-5 sm:w-6 sm:h-6 text-green-500 opacity-50 flex-shrink-0" />
           </div>
         </Card>
-        <Card className="bg-slate-800 border-slate-700 p-6">
-          <div className="flex items-center justify-between">
-            <div>
-              <p className="text-slate-400 text-sm mb-2">Rejected</p>
-              <p className="text-2xl sm:text-3xl font-bold text-red-500">{rejected}</p>
+        <Card className="bg-slate-800 border-slate-700 p-3 sm:p-4">
+          <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-2">
+            <div className="flex-1 min-w-0">
+              <p className="text-slate-400 text-xs sm:text-sm mb-1">Rejected</p>
+              <p className="text-xl sm:text-2xl font-bold text-red-500">{rejected}</p>
             </div>
-            <XCircle className="w-6 h-6 sm:w-8 sm:h-8 text-red-500 opacity-50 flex-shrink-0" />
+            <XCircle className="w-5 h-5 sm:w-6 sm:h-6 text-red-500 opacity-50 flex-shrink-0" />
           </div>
         </Card>
-        <Card className="bg-slate-800 border-slate-700 p-6">
-          <div className="flex items-center justify-between">
-            <div>
-              <p className="text-slate-400 text-sm mb-2">Total Requested</p>
-              <p className="text-2xl sm:text-3xl font-bold text-cyan-500">{totalRequested}</p>
+        <Card className="bg-slate-800 border-slate-700 p-3 sm:p-4">
+          <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-2">
+            <div className="flex-1 min-w-0">
+              <p className="text-slate-400 text-xs sm:text-sm mb-1">Total</p>
+              <p className="text-xl sm:text-2xl font-bold text-cyan-500">{totalRequested}</p>
             </div>
-            <ShoppingCart className="w-6 h-6 sm:w-8 sm:h-8 text-cyan-500 opacity-50 flex-shrink-0" />
+            <ShoppingCart className="w-5 h-5 sm:w-6 sm:h-6 text-cyan-500 opacity-50 flex-shrink-0" />
           </div>
         </Card>
-        <Card className="bg-slate-800 border-slate-700 p-6">
-          <div className="flex items-center justify-between">
-            <div>
-              <p className="text-slate-400 text-sm mb-2">Approval Rate</p>
-              <p className="text-2xl sm:text-3xl font-bold text-emerald-500">{approvalRate}%</p>
+        <Card className="bg-slate-800 border-slate-700 p-3 sm:p-4">
+          <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-2">
+            <div className="flex-1 min-w-0">
+              <p className="text-slate-400 text-xs sm:text-sm mb-1">Rate</p>
+              <p className="text-xl sm:text-2xl font-bold text-emerald-500">{approvalRate}%</p>
             </div>
-            <TrendingUp className="w-6 h-6 sm:w-8 sm:h-8 text-emerald-500 opacity-50 flex-shrink-0" />
+            <TrendingUp className="w-5 h-5 sm:w-6 sm:h-6 text-emerald-500 opacity-50 flex-shrink-0" />
           </div>
         </Card>
-        <Card className="bg-orange-950/30 border-orange-700 border p-4 sm:p-6">
-          <div className="flex items-center justify-between">
-            <div>
-              <p className="text-slate-400 text-sm mb-2 flex items-center gap-1">
-                <RotateCcw className="w-4 h-4" />
-                Stock Returns
-              </p>
-              <p className="text-2xl sm:text-3xl font-bold text-orange-400">{sortedStockReturns.length}</p>
+        <Card className="bg-slate-800 border-slate-700 p-3 sm:p-4">
+          <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-2">
+            <div className="flex-1 min-w-0">
+              <p className="text-slate-400 text-xs sm:text-sm mb-1">Returns</p>
+              <p className="text-xl sm:text-2xl font-bold text-orange-500">{sortedStockReturns.length}</p>
             </div>
+            <RotateCcw className="w-5 h-5 sm:w-6 sm:h-6 text-orange-500 opacity-50 flex-shrink-0" />
           </div>
-        </Card>
-      </div>
-
-      {/* Workflow Overview */}
-      <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-        <Card className="bg-slate-800 border-slate-700 p-4">
-          <p className="text-slate-400 text-sm mb-2">In Progress</p>
-          <p className="text-2xl font-bold text-amber-400 mb-2">{inProgress}</p>
-          <p className="text-xs text-slate-500">Awaiting approval</p>
-        </Card>
-        <Card className="bg-slate-800 border-slate-700 p-4">
-          <p className="text-slate-400 text-sm mb-2">Completed</p>
-          <p className="text-2xl font-bold text-emerald-400 mb-2">{completed}</p>
-          <p className="text-xs text-slate-500">Approved or rejected</p>
-        </Card>
-        <Card className="bg-slate-800 border-slate-700 p-4">
-          <p className="text-slate-400 text-sm mb-2">This Month</p>
-          <p className="text-2xl font-bold text-blue-400 mb-2">{requestsThisMonth}</p>
-          <p className="text-xs text-slate-500">Total requests</p>
         </Card>
       </div>
 
@@ -320,6 +368,14 @@ export default function AdminDashboard({ userName }: AdminDashboardProps) {
           <TabsTrigger value="overview" className="data-[state=active]:bg-blue-600 data-[state=active]:text-white">
             <ShoppingCart className="w-4 h-4 mr-2" />
             Overview
+          </TabsTrigger>
+          <TabsTrigger value="stock-requests" className="data-[state=active]:bg-amber-600 data-[state=active]:text-white">
+            <TrendingUp className="w-4 h-4 mr-2" />
+            Stock Requests
+          </TabsTrigger>
+          <TabsTrigger value="stock" className="data-[state=active]:bg-green-600 data-[state=active]:text-white">
+            <Package className="w-4 h-4 mr-2" />
+            My Stock
           </TabsTrigger>
           <TabsTrigger value="returns" className="data-[state=active]:bg-orange-600 data-[state=active]:text-white">
             <RotateCcw className="w-4 h-4 mr-2" />
@@ -332,7 +388,187 @@ export default function AdminDashboard({ userName }: AdminDashboardProps) {
         </TabsList>
 
         <TabsContent value="overview" className="mt-4">
-      {/* Main Content */}
+      {/* Overview Content - Clean Summary */}
+      <div className="space-y-4 sm:space-y-6">
+        {/* Summary Cards */}
+        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3 sm:gap-4">
+          <Card className="bg-slate-800 border-slate-700 p-4">
+            <div className="flex items-center justify-between mb-2">
+              <Package className="w-5 h-5 text-cyan-500 opacity-50" />
+            </div>
+            <p className="text-slate-400 text-sm mb-1">My Stock</p>
+            <p className="text-2xl font-bold text-cyan-400">{adminNetStock}</p>
+            <p className="text-xs text-slate-500 mt-1">{adminInventory.length} products in inventory</p>
+          </Card>
+          <Card className="bg-slate-800 border-slate-700 p-4">
+            <div className="flex items-center justify-between mb-2">
+              <UserPlus className="w-5 h-5 text-purple-500 opacity-50" />
+            </div>
+            <p className="text-slate-400 text-sm mb-1">My Agents</p>
+            <p className="text-2xl font-bold text-purple-400">{myAgents.length}</p>
+            <p className="text-xs text-slate-500 mt-1">{myAgents.filter(a => a.is_active).length} active agents</p>
+          </Card>
+          <Card className="bg-slate-800 border-slate-700 p-4">
+            <div className="flex items-center justify-between mb-2">
+              <TrendingUp className="w-5 h-5 text-blue-500 opacity-50" />
+            </div>
+            <p className="text-slate-400 text-sm mb-1">This Month</p>
+            <p className="text-2xl font-bold text-blue-400">{requestsThisMonth}</p>
+            <p className="text-xs text-slate-500 mt-1">New requests this month</p>
+          </Card>
+          <Card className="bg-slate-800 border-slate-700 p-4">
+            <div className="flex items-center justify-between mb-2">
+              <RotateCcw className="w-5 h-5 text-orange-500 opacity-50" />
+            </div>
+            <p className="text-slate-400 text-sm mb-1">Returns</p>
+            <p className="text-2xl font-bold text-orange-400">{sortedStockReturns.length}</p>
+            <p className="text-xs text-slate-500 mt-1">{sortedStockReturns.filter(r => r.status === "pending").length} pending</p>
+          </Card>
+        </div>
+
+        {/* Recent Activity */}
+        <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
+          {/* Recent Stock Requests */}
+          <Card className="bg-slate-800 border-slate-700 p-4 sm:p-5">
+            <div className="flex items-center justify-between mb-4">
+              <h3 className="text-base sm:text-lg font-semibold text-white flex items-center gap-2">
+                <TrendingUp className="w-4 h-4 sm:w-5 sm:h-5 text-amber-500" />
+                Recent Requests
+              </h3>
+              <Button
+                variant="ghost"
+                size="sm"
+                onClick={() => setActiveTab("stock-requests")}
+                className="text-xs text-slate-400 hover:text-white h-auto py-1"
+              >
+                View All →
+              </Button>
+            </div>
+            <div className="space-y-2">
+              {allRequests.slice(0, 5).map((request) => (
+                <div
+                  key={request.id}
+                  className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-2 py-2 px-3 bg-slate-700/50 rounded hover:bg-slate-700 transition"
+                >
+                  <div className="flex-1 min-w-0 w-full sm:w-auto">
+                    <p className="text-sm text-white font-medium truncate">
+                      {request.primary_product_name || request.items?.[0]?.product?.name || "Multiple Products"}
+                    </p>
+                    <div className="flex items-center gap-2 mt-1 flex-wrap">
+                      <p className="text-xs text-slate-400">{formatDateISO(request.requested_date || request.created_at)}</p>
+                      <span className={`text-xs px-2 py-0.5 rounded-full whitespace-nowrap ${
+                        request.status === "pending" ? "bg-amber-500/20 text-amber-400" :
+                        request.status === "dispatched" ? "bg-green-500/20 text-green-400" :
+                        request.status === "confirmed" ? "bg-cyan-500/20 text-cyan-400" :
+                        "bg-red-500/20 text-red-400"
+                      }`}>
+                        {request.status}
+                      </span>
+                    </div>
+                  </div>
+                  <span className="text-sm font-bold text-cyan-400 whitespace-nowrap">
+                    {request.items?.reduce((sum, item) => sum + item.quantity, 0) || 0} units
+                  </span>
+                </div>
+              ))}
+              {allRequests.length === 0 && (
+                <p className="text-slate-400 text-sm text-center py-6">No requests yet</p>
+              )}
+            </div>
+          </Card>
+
+          {/* Recent Agents */}
+          <Card className="bg-slate-800 border-slate-700 p-4 sm:p-5">
+            <div className="flex items-center justify-between mb-4">
+              <h3 className="text-base sm:text-lg font-semibold text-white flex items-center gap-2">
+                <UserPlus className="w-4 h-4 sm:w-5 sm:h-5 text-purple-500" />
+                My Agents
+              </h3>
+              <Button
+                variant="ghost"
+                size="sm"
+                onClick={() => setActiveTab("users")}
+                className="text-xs text-slate-400 hover:text-white h-auto py-1"
+              >
+                View All →
+              </Button>
+            </div>
+            <div className="space-y-2">
+              {myAgents.slice(0, 5).map((agent) => (
+                <div
+                  key={agent.id}
+                  className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-2 py-2 px-3 bg-slate-700/50 rounded hover:bg-slate-700 transition"
+                >
+                  <div className="flex-1 min-w-0 w-full sm:w-auto">
+                    <p className="text-sm text-white font-medium">{agent.name}</p>
+                    <p className="text-xs text-slate-400">@{agent.username}</p>
+                  </div>
+                  <span className={`text-xs px-2 py-0.5 rounded-full whitespace-nowrap ${
+                    agent.is_active ? "bg-green-500/20 text-green-400" : "bg-amber-500/20 text-amber-400"
+                  }`}>
+                    {agent.is_active ? "Active" : "Pending"}
+                  </span>
+                </div>
+              ))}
+              {myAgents.length === 0 && (
+                <p className="text-slate-400 text-sm text-center py-6">No agents created yet</p>
+              )}
+            </div>
+          </Card>
+        </div>
+
+        {/* Quick Actions */}
+        <Card className="bg-slate-800 border-slate-700 p-4 sm:p-5">
+          <h3 className="text-base sm:text-lg font-semibold text-white mb-4">Quick Actions</h3>
+          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3">
+            <Button
+              onClick={() => {
+                setRequestModalType("super-admin")
+                setShowRequestModal(true)
+              }}
+              className="bg-blue-600 hover:bg-blue-700 text-white text-sm w-full"
+              size="sm"
+            >
+              <Plus className="w-4 h-4 mr-2" />
+              Request Stock
+            </Button>
+            <Button
+              onClick={() => {
+                setRequestModalType("admin-transfer")
+                setShowRequestModal(true)
+              }}
+              variant="outline"
+              className="border-blue-600 text-blue-400 hover:bg-blue-950 text-sm w-full"
+              size="sm"
+            >
+              <Plus className="w-4 h-4 mr-2" />
+              Transfer Stock
+            </Button>
+            <Button
+              onClick={() => setShowStockReturnModal(true)}
+              variant="outline"
+              className="border-orange-600 text-orange-400 hover:bg-orange-950 text-sm w-full"
+              size="sm"
+            >
+              <RotateCcw className="w-4 h-4 mr-2" />
+              Return Stock
+            </Button>
+            <Button
+              onClick={() => setShowCreateUserModal(true)}
+              variant="outline"
+              className="border-purple-600 text-purple-400 hover:bg-purple-950 text-sm w-full"
+              size="sm"
+            >
+              <UserPlus className="w-4 h-4 mr-2" />
+              Create Agent
+            </Button>
+          </div>
+        </Card>
+      </div>
+        </TabsContent>
+
+        <TabsContent value="stock-requests" className="mt-4">
+      {/* Stock Requests Content */}
       <div className="space-y-4">
         <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3 sm:gap-4">
           <h2 className="text-lg sm:text-xl font-bold text-white">Stock Requests</h2>
@@ -394,7 +630,7 @@ export default function AdminDashboard({ userName }: AdminDashboardProps) {
             />
           </div>
           
-          {/* Status Filters */}
+          {/* Status Filters  */}
         <div className="flex gap-2 flex-wrap">
           <button
             onClick={() => setStatusFilter("all")}
@@ -490,7 +726,7 @@ export default function AdminDashboard({ userName }: AdminDashboardProps) {
                       )}
                     </div>
                     
-                    <div className="grid grid-cols-2 gap-2 text-sm">
+                    <div className="grid grid-cols-2 sm:grid-cols-3 gap-2 text-sm">
                       <div>
                         <p className="text-slate-400 text-xs">Quantity</p>
                         <p className="text-white font-bold text-cyan-400">
@@ -498,12 +734,25 @@ export default function AdminDashboard({ userName }: AdminDashboardProps) {
                         </p>
                       </div>
                       <div>
+                        <p className="text-slate-400 text-xs">Current Stock</p>
+                        <p className="text-slate-300 font-semibold">
+                          {(() => {
+                            const firstItem = request.items?.[0]
+                            if (!firstItem) return "N/A"
+                            const product = firstItem.product || requestProducts[firstItem.product_id]
+                            if (!product) return "N/A"
+                            const stock = product.total_stock ?? product.central_stock ?? product.quantity ?? 0
+                            return stock
+                          })()}
+                        </p>
+                      </div>
+                      <div className="col-span-2 sm:col-span-1">
                         <p className="text-slate-400 text-xs">Date</p>
                         <p className="text-slate-300">
                           {formatDateISO(request.requested_date || request.created_at)}
                         </p>
                       </div>
-        </div>
+                    </div>
 
                     <div className="pt-2 border-t border-slate-700">
                       {(isAgentRequest || isIncomingAdminTransfer) && request.status === "pending" && (
@@ -744,6 +993,197 @@ export default function AdminDashboard({ userName }: AdminDashboardProps) {
       </div>
         </TabsContent>
 
+        <TabsContent value="stock" className="mt-4">
+          {/* My Stock Section */}
+          <div className="space-y-4">
+            <div className="flex items-center justify-between flex-wrap gap-4">
+              <h2 className="text-xl font-bold text-white flex items-center gap-2">
+                <Package className="w-5 h-5 text-green-500" />
+                My Stock Inventory
+              </h2>
+            </div>
+
+            {/* Search */}
+            <div className="relative">
+              <Search className="w-4 h-4 absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" />
+              <input
+                type="text"
+                placeholder="Search by product name or model..."
+                value={inventorySearchQuery}
+                onChange={(e) => setInventorySearchQuery(e.target.value)}
+                className="w-full pl-10 pr-4 py-2 bg-slate-700 border border-slate-600 rounded-lg text-white placeholder-slate-500 focus:outline-none focus:border-green-500"
+              />
+            </div>
+
+            {loadingInventory ? (
+              <Card className="bg-slate-800 border-slate-700 p-8 text-center">
+                <Loader2 className="w-8 h-8 animate-spin text-green-500 mx-auto mb-4" />
+                <p className="text-slate-400">Loading inventory...</p>
+              </Card>
+            ) : (
+              <>
+                {/* Filtered inventory */}
+                {(() => {
+                  const filtered = adminInventory.filter((item) => {
+                    if (!inventorySearchQuery) return true
+                    const product = item.product || requestProducts[item.product_id]
+                    if (!product) return false
+                    const searchLower = inventorySearchQuery.toLowerCase()
+                    return (
+                      product.name.toLowerCase().includes(searchLower) ||
+                      (product.model && product.model.toLowerCase().includes(searchLower)) ||
+                      (product.category && product.category.toLowerCase().includes(searchLower))
+                    )
+                  })
+
+                  return filtered.length > 0 ? (
+                    <>
+                      {/* Mobile Card View */}
+                      <div className="block lg:hidden space-y-3">
+                        {filtered.map((item) => {
+                          const product = item.product || requestProducts[item.product_id]
+                          const productName = product?.name || "Unknown Product"
+                          const productModel = product?.model || ""
+                          const productCategory = product?.category || ""
+
+                          return (
+                            <Card
+                              key={item.id}
+                              className="bg-slate-800 border-slate-700 p-4"
+                            >
+                              <div className="space-y-3">
+                                <div className="flex items-start justify-between gap-2">
+                                  <div className="flex-1 min-w-0">
+                                    <p className="text-white font-semibold text-sm">
+                                      {productName}
+                                    </p>
+                                    {productModel && (
+                                      <p className="text-xs text-slate-400 mt-1">
+                                        {productModel}
+                                      </p>
+                                    )}
+                                    {productCategory && (
+                                      <p className="text-xs text-slate-500 mt-1">
+                                        {productCategory}
+                                      </p>
+                                    )}
+                                  </div>
+                                  <div className="text-right">
+                                    <p className="text-2xl font-bold text-green-400">
+                                      {item.quantity}
+                                    </p>
+                                    <p className="text-xs text-slate-400">units</p>
+                                  </div>
+                                </div>
+                                <div className="pt-2 border-t border-slate-700">
+                                  <p className="text-xs text-slate-400">
+                                    Last updated: {formatDateISO(item.updated_at)}
+                                  </p>
+                                </div>
+                              </div>
+                            </Card>
+                          )
+                        })}
+                      </div>
+
+                      {/* Desktop Table View */}
+                      <div className="hidden lg:block bg-slate-800 border border-slate-700 rounded-lg overflow-hidden">
+                        <div className="overflow-x-auto">
+                          <table className="w-full">
+                            <thead className="bg-slate-700/50 border-b border-slate-700">
+                              <tr>
+                                <th className="px-6 py-3 text-left text-sm font-semibold text-slate-300">
+                                  Product
+                                </th>
+                                <th className="px-6 py-3 text-left text-sm font-semibold text-slate-300">
+                                  Model
+                                </th>
+                                <th className="px-6 py-3 text-left text-sm font-semibold text-slate-300">
+                                  Category
+                                </th>
+                                <th className="px-6 py-3 text-left text-sm font-semibold text-slate-300">
+                                  Quantity
+                                </th>
+                                <th className="px-6 py-3 text-left text-sm font-semibold text-slate-300">
+                                  Last Updated
+                                </th>
+                              </tr>
+                            </thead>
+                            <tbody className="divide-y divide-slate-700">
+                              {filtered.map((item) => {
+                                const product = item.product || requestProducts[item.product_id]
+                                const productName = product?.name || "Unknown Product"
+                                const productModel = product?.model || ""
+                                const productCategory = product?.category || ""
+
+                                return (
+                                  <tr
+                                    key={item.id}
+                                    className="hover:bg-slate-700/30 transition"
+                                  >
+                                    <td className="px-6 py-4 text-white font-medium">
+                                      {productName}
+                                    </td>
+                                    <td className="px-6 py-4 text-slate-300">
+                                      {productModel || "N/A"}
+                                    </td>
+                                    <td className="px-6 py-4 text-slate-400">
+                                      {productCategory || "N/A"}
+                                    </td>
+                                    <td className="px-6 py-4">
+                                      <span className="text-green-400 font-bold text-lg">
+                                        {item.quantity}
+                                      </span>
+                                      <span className="text-slate-400 text-sm ml-1">units</span>
+                                    </td>
+                                    <td className="px-6 py-4 text-slate-400 text-sm">
+                                      {formatDateISO(item.updated_at)}
+                                    </td>
+                                  </tr>
+                                )
+                              })}
+                            </tbody>
+                          </table>
+                        </div>
+                      </div>
+
+                      {/* Summary Card */}
+                      <Card className="bg-green-950/30 border-green-700 border p-4">
+                        <div className="flex items-center justify-between">
+                          <div>
+                            <p className="text-slate-400 text-sm mb-1">Total Stock Value</p>
+                            <p className="text-2xl font-bold text-green-400">
+                              {filtered.reduce((sum, item) => sum + item.quantity, 0)}
+                            </p>
+                            <p className="text-xs text-slate-500 mt-1">
+                              {filtered.length} {filtered.length === 1 ? "product" : "products"}
+                            </p>
+                          </div>
+                          <Package className="w-8 h-8 text-green-500 opacity-50 flex-shrink-0" />
+                        </div>
+                      </Card>
+                    </>
+                  ) : (
+                    <Card className="bg-slate-800 border-slate-700 p-8 text-center">
+                      <Package className="w-12 h-12 text-slate-500 mx-auto mb-4" />
+                      <p className="text-slate-400 text-lg font-semibold mb-2">
+                        {inventorySearchQuery
+                          ? "No products found"
+                          : "No stock available"}
+                      </p>
+                      <p className="text-slate-500 text-sm">
+                        {inventorySearchQuery
+                          ? "Try adjusting your search query"
+                          : "Your inventory will appear here once you receive stock"}
+                      </p>
+                    </Card>
+                  )
+                })()}
+              </>
+            )}
+          </div>
+        </TabsContent>
+
         <TabsContent value="returns" className="mt-4">
       {/* Stock Returns Section */}
       {sortedStockReturns.length > 0 ? (
@@ -921,6 +1361,160 @@ export default function AdminDashboard({ userName }: AdminDashboardProps) {
                 Create Agent
               </Button>
             </Card>
+
+            {/* Agents List Section */}
+            <div className="space-y-4">
+              <div className="flex items-center justify-between flex-wrap gap-4">
+                <h2 className="text-xl font-bold text-white flex items-center gap-2">
+                  <UserPlus className="w-5 h-5 text-purple-500" />
+                  My Agents ({myAgents.length})
+                </h2>
+              </div>
+
+              {/* Search for Agents */}
+              <div className="relative">
+                <Search className="w-4 h-4 absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" />
+                <input
+                  type="text"
+                  placeholder="Search agents by name or username..."
+                  value={agentsSearchQuery}
+                  onChange={(e) => setAgentsSearchQuery(e.target.value)}
+                  className="w-full pl-10 pr-4 py-2 bg-slate-700 border border-slate-600 rounded-lg text-white placeholder-slate-500 focus:outline-none focus:border-purple-500"
+                />
+              </div>
+
+              {loadingAgents ? (
+                <Card className="bg-slate-800 border-slate-700 p-8 text-center">
+                  <Loader2 className="w-8 h-8 animate-spin text-purple-500 mx-auto mb-4" />
+                  <p className="text-slate-400">Loading agents...</p>
+                </Card>
+              ) : (
+                <>
+                  {(() => {
+                    const filteredAgents = myAgents.filter((agent) => {
+                      if (!agentsSearchQuery) return true
+                      const searchLower = agentsSearchQuery.toLowerCase()
+                      return (
+                        agent.name.toLowerCase().includes(searchLower) ||
+                        agent.username.toLowerCase().includes(searchLower)
+                      )
+                    })
+
+                    return filteredAgents.length > 0 ? (
+                      <>
+                        {/* Mobile Card View */}
+                        <div className="block lg:hidden space-y-3">
+                          {filteredAgents.map((agent) => (
+                            <Card key={agent.id} className="bg-slate-800 border-slate-700 p-4">
+                              <div className="space-y-3">
+                                <div className="flex items-start justify-between gap-2">
+                                  <div className="flex-1 min-w-0">
+                                    <p className="text-white font-semibold text-sm">{agent.name}</p>
+                                    <p className="text-xs text-slate-400 mt-1">@{agent.username}</p>
+                                  </div>
+                                  <span
+                                    className={`px-2 py-1 text-xs font-semibold rounded-full ${
+                                      agent.is_active
+                                        ? "bg-green-500/20 text-green-400 border border-green-500/50"
+                                        : "bg-amber-500/20 text-amber-400 border border-amber-500/50"
+                                    }`}
+                                  >
+                                    {agent.is_active ? "Active" : "Pending"}
+                                  </span>
+                                </div>
+                                <div className="pt-2 border-t border-slate-700">
+                                  <div className="grid grid-cols-2 gap-2 text-xs">
+                                    <div>
+                                      <p className="text-slate-400">Role</p>
+                                      <p className="text-slate-300 font-medium">{agent.role}</p>
+                                    </div>
+                                    <div>
+                                      <p className="text-slate-400">Created</p>
+                                      <p className="text-slate-300">
+                                        {formatDateISO(agent.created_at)}
+                                      </p>
+                                    </div>
+                                  </div>
+                                </div>
+                              </div>
+                            </Card>
+                          ))}
+                        </div>
+
+                        {/* Desktop Table View */}
+                        <div className="hidden lg:block bg-slate-800 border border-slate-700 rounded-lg overflow-hidden">
+                          <div className="overflow-x-auto">
+                            <table className="w-full">
+                              <thead className="bg-slate-700/50 border-b border-slate-700">
+                                <tr>
+                                  <th className="px-6 py-3 text-left text-sm font-semibold text-slate-300">
+                                    Name
+                                  </th>
+                                  <th className="px-6 py-3 text-left text-sm font-semibold text-slate-300">
+                                    Username
+                                  </th>
+                                  <th className="px-6 py-3 text-left text-sm font-semibold text-slate-300">
+                                    Role
+                                  </th>
+                                  <th className="px-6 py-3 text-left text-sm font-semibold text-slate-300">
+                                    Status
+                                  </th>
+                                  <th className="px-6 py-3 text-left text-sm font-semibold text-slate-300">
+                                    Created Date
+                                  </th>
+                                </tr>
+                              </thead>
+                              <tbody className="divide-y divide-slate-700">
+                                {filteredAgents.map((agent) => (
+                                  <tr
+                                    key={agent.id}
+                                    className="hover:bg-slate-700/30 transition"
+                                  >
+                                    <td className="px-6 py-4 text-white font-medium">
+                                      {agent.name}
+                                    </td>
+                                    <td className="px-6 py-4 text-slate-300">@{agent.username}</td>
+                                    <td className="px-6 py-4 text-slate-400 capitalize">
+                                      {agent.role}
+                                    </td>
+                                    <td className="px-6 py-4">
+                                      <span
+                                        className={`px-3 py-1 text-xs font-semibold rounded-full ${
+                                          agent.is_active
+                                            ? "bg-green-500/20 text-green-400 border border-green-500/50"
+                                            : "bg-amber-500/20 text-amber-400 border border-amber-500/50"
+                                        }`}
+                                      >
+                                        {agent.is_active ? "Active" : "Pending Approval"}
+                                      </span>
+                                    </td>
+                                    <td className="px-6 py-4 text-slate-400 text-sm">
+                                      {formatDateISO(agent.created_at)}
+                                    </td>
+                                  </tr>
+                                ))}
+                              </tbody>
+                            </table>
+                          </div>
+                        </div>
+                      </>
+                    ) : (
+                      <Card className="bg-slate-800 border-slate-700 p-8 text-center">
+                        <UserPlus className="w-12 h-12 text-slate-500 mx-auto mb-4" />
+                        <p className="text-slate-400 text-lg font-semibold mb-2">
+                          {agentsSearchQuery ? "No agents found" : "No agents created yet"}
+                        </p>
+                        <p className="text-slate-500 text-sm">
+                          {agentsSearchQuery
+                            ? "Try adjusting your search query"
+                            : "Create your first agent using the button above"}
+                        </p>
+                      </Card>
+                    )
+                  })()}
+                </>
+              )}
+            </div>
           </div>
         </TabsContent>
       </Tabs>
@@ -974,6 +1568,8 @@ export default function AdminDashboard({ userName }: AdminDashboardProps) {
           onClose={() => setShowCreateUserModal(false)}
           onSuccess={async () => {
             setShowCreateUserModal(false)
+            // Reload agents list after creating a new agent
+            await loadMyAgents()
           }}
         />
       )}

@@ -82,9 +82,15 @@ export default function AdminStockRequestModal({
     setIsSubmitting(true)
 
     try {
+      // Ensure quantities are numbers, not strings
+      const formattedItems = items.map(item => ({
+        product_id: item.product_id,
+        quantity: typeof item.quantity === 'string' ? parseInt(item.quantity, 10) : item.quantity
+      }))
+
       await stockRequestsApi.create({
         requested_from: requestType === "super-admin" ? "super-admin" : selectedAdminId,
-        items: items,
+        items: formattedItems,
         notes:
           notes ||
           (requestType === "admin-transfer"
@@ -95,7 +101,71 @@ export default function AdminStockRequestModal({
       onSuccess()
       onClose()
     } catch (err: any) {
-      setError(err.message || "Failed to create stock request")
+      console.error("Stock request error details:", {
+        error: err,
+        name: err?.name,
+        message: err?.message,
+        status: err?.status,
+        data: err?.data,
+        errorData: err?.data?.error,
+        errorDetails: err?.data?.error?.details,
+      })
+      
+      // Log the full error structure for debugging
+      if (err?.data?.error) {
+        console.log("Full error object:", JSON.stringify(err.data.error, null, 2))
+      }
+      
+      // Extract detailed error message
+      let errorMessage = "Failed to create stock request"
+      
+      if (err && typeof err.status === 'number') {
+        // Handle nested error structure (data.error)
+        const errorData = err.data?.error || err.data
+        const apiErrorRaw = typeof errorData === 'string' ? errorData : (errorData?.message || err.message || "")
+        const apiError = typeof apiErrorRaw === 'string' ? apiErrorRaw : JSON.stringify(apiErrorRaw)
+        
+        if (err.status === 400) {
+          // Validation errors - check for details array first
+          if (errorData?.details && Array.isArray(errorData.details) && errorData.details.length > 0) {
+            // Extract messages from details array
+            const detailMessages = errorData.details.map((detail: any) => {
+              if (typeof detail === 'string') {
+                return detail
+              } else if (detail?.message) {
+                return detail.message
+              } else if (detail?.field && detail?.message) {
+                return `${detail.field}: ${detail.message}`
+              } else if (detail?.path && detail?.message) {
+                return `${detail.path}: ${detail.message}`
+              } else {
+                return JSON.stringify(detail)
+              }
+            })
+            errorMessage = detailMessages.join(", ")
+          } else if (errorData?.errors && Array.isArray(errorData.errors)) {
+            errorMessage = errorData.errors.join(", ")
+          } else if (typeof errorData?.errors === 'object' && errorData?.errors !== null) {
+            // Field-specific validation errors
+            const fieldErrors = Object.entries(errorData.errors)
+              .map(([field, message]) => `${field}: ${message}`)
+              .join(", ")
+            errorMessage = fieldErrors || apiError || "Validation error. Please check your input."
+          } else if (errorData?.message) {
+            errorMessage = errorData.message
+          } else if (typeof errorData === 'string') {
+            errorMessage = errorData
+          } else {
+            errorMessage = apiError || "Validation error. Please check your input."
+          }
+        } else {
+          errorMessage = apiError || errorMessage
+        }
+      } else if (err?.message) {
+        errorMessage = err.message
+      }
+      
+      setError(errorMessage)
       setIsSubmitting(false)
     }
   }

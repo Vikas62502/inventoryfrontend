@@ -4,9 +4,10 @@ import { useState, useEffect } from "react"
 import { Card } from "@/components/ui/card"
 import { Button } from "@/components/ui/button"
 import { X, CheckCircle, XCircle, Upload, Image as ImageIcon, Loader2, AlertCircle } from "lucide-react"
-import type { StockRequest } from "@/lib/api"
-import { stockRequestsApi, productsApi, type Product } from "@/lib/api"
+import type { StockRequest, AdminInventory } from "@/lib/api"
+import { stockRequestsApi, productsApi, adminInventoryApi, type Product } from "@/lib/api"
 import { formatImageUrl, formatDateISO } from "@/lib/utils"
+import { authService } from "@/lib/auth"
 
 interface EnhancedRequestApprovalModalProps {
   request: StockRequest
@@ -30,6 +31,10 @@ export default function EnhancedRequestApprovalModal({
   const [fullRequest, setFullRequest] = useState<StockRequest>(request)
   const [products, setProducts] = useState<Record<string, Product>>({})
   const [loading, setLoading] = useState(true)
+  // Editable quantities - map of item index to quantity
+  const [editedQuantities, setEditedQuantities] = useState<Record<number, number>>({})
+  // Admin inventory - map of product_id to quantity
+  const [adminInventory, setAdminInventory] = useState<Record<string, number>>({})
 
   // Fetch full request details and products
   useEffect(() => {
@@ -40,6 +45,13 @@ export default function EnhancedRequestApprovalModal({
         const fullRequestData = await stockRequestsApi.getById(request.id)
         setFullRequest(fullRequestData)
 
+        // Initialize edited quantities with original quantities
+        const initialQuantities: Record<number, number> = {}
+        fullRequestData.items?.forEach((item, index) => {
+          initialQuantities[index] = item.quantity
+        })
+        setEditedQuantities(initialQuantities)
+
         // Fetch all products to populate missing product info
         const allProducts = await productsApi.getAll()
         const productsMap: Record<string, Product> = {}
@@ -47,10 +59,32 @@ export default function EnhancedRequestApprovalModal({
           productsMap[p.id] = p
         })
         setProducts(productsMap)
+
+        // Fetch current admin's inventory
+        const currentAdmin = authService.getUser()
+        if (currentAdmin?.id) {
+          try {
+            const adminInv = await adminInventoryApi.getByAdmin(currentAdmin.id)
+            const inventoryMap: Record<string, number> = {}
+            adminInv.forEach((inv: AdminInventory) => {
+              inventoryMap[inv.product_id] = inv.quantity
+            })
+            setAdminInventory(inventoryMap)
+          } catch (invErr) {
+            console.error("Failed to load admin inventory:", invErr)
+            setAdminInventory({})
+          }
+        }
       } catch (err) {
         console.error("Failed to load request details:", err)
         // Fallback to original request
         setFullRequest(request)
+        // Initialize with original request quantities
+        const initialQuantities: Record<number, number> = {}
+        request.items?.forEach((item, index) => {
+          initialQuantities[index] = item.quantity
+        })
+        setEditedQuantities(initialQuantities)
       } finally {
         setLoading(false)
       }
@@ -82,11 +116,40 @@ export default function EnhancedRequestApprovalModal({
     }
   }
 
+  const handleQuantityChange = (index: number, newQuantity: number, originalQuantity: number) => {
+    // Ensure quantity is not more than original and not less than 1
+    const quantity = Math.max(1, Math.min(newQuantity, originalQuantity))
+    setEditedQuantities(prev => ({
+      ...prev,
+      [index]: quantity
+    }))
+  }
+
   const handleApprove = async () => {
     setIsSubmitting(true)
     setError(null)
 
     try {
+      // Check if any quantities were modified
+      const hasModifiedQuantities = fullRequest.items?.some((item, index) => {
+        const editedQty = editedQuantities[index] ?? item.quantity
+        return editedQty !== item.quantity
+      })
+
+      // If quantities were modified, we need to update the request first
+      if (hasModifiedQuantities && fullRequest.items) {
+        const updatedItems = fullRequest.items.map((item, index) => ({
+          product_id: item.product_id,
+          quantity: editedQuantities[index] ?? item.quantity
+        }))
+        
+        // Update the request with modified quantities
+        await stockRequestsApi.update(request.id, {
+          items: updatedItems
+        })
+      }
+
+      // Dispatch the request
       await stockRequestsApi.dispatch(request.id, {
         dispatch_image: dispatchImage || undefined,
       })
@@ -158,14 +221,39 @@ export default function EnhancedRequestApprovalModal({
                       const product = item.product || products[item.product_id]
                       const productName = product?.name || "Unknown Product"
                       const productModel = product?.model || ""
+                      // Get admin's stock for this product, fallback to 0 if not found
+                      const adminStock = adminInventory[item.product_id] ?? 0
+                      const originalQuantity = item.quantity
+                      const editedQuantity = editedQuantities[index] ?? originalQuantity
+                      const isModified = editedQuantity !== originalQuantity
+                      
                       return (
-                        <div key={index} className="flex justify-between items-center p-2 bg-slate-600/50 rounded">
-                          <div>
+                        <div key={index} className="flex justify-between items-center p-2 bg-slate-600/50 rounded gap-3">
+                          <div className="flex-1 min-w-0">
                             <p className="text-white font-medium">
                               {productName} {productModel && `- ${productModel}`}
                             </p>
+                            <p className="text-slate-400 text-xs mt-1">My Stock: {adminStock} units</p>
+                            {isModified && (
+                              <p className="text-amber-400 text-xs mt-1">
+                                Original: {originalQuantity} units
+                              </p>
+                            )}
                           </div>
-                          <p className="text-cyan-400 font-bold">{item.quantity} units</p>
+                          <div className="flex items-center gap-2 flex-shrink-0">
+                            <input
+                              type="number"
+                              min="1"
+                              max={originalQuantity}
+                              value={editedQuantity}
+                              onChange={(e) => {
+                                const newQty = parseInt(e.target.value) || 0
+                                handleQuantityChange(index, newQty, originalQuantity)
+                              }}
+                              className="w-20 px-2 py-1 bg-slate-700 border border-slate-600 rounded text-white text-center focus:outline-none focus:border-cyan-500 font-semibold"
+                            />
+                            <span className="text-cyan-400 font-bold whitespace-nowrap">units</span>
+                          </div>
                         </div>
                       )
                     }) || []
@@ -183,7 +271,14 @@ export default function EnhancedRequestApprovalModal({
               <div>
                 <p className="text-slate-400 text-sm">Request Date</p>
                 <p className="text-white">
-                  {formatDateISO(fullRequest.created_at || request.created_at)}
+                  {formatDateISO(
+                    fullRequest.requested_date || 
+                    fullRequest.requestedDate || 
+                    fullRequest.created_at || 
+                    request.requested_date || 
+                    request.requestedDate || 
+                    request.created_at
+                  )}
                 </p>
               </div>
             </div>

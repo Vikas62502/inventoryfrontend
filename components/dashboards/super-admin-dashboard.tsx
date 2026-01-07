@@ -46,6 +46,12 @@ export default function SuperAdminDashboard({ userName }: SuperAdminDashboardPro
   const [processingAgentIds, setProcessingAgentIds] = useState<Set<string>>(new Set())
   const [agentsSearchQuery, setAgentsSearchQuery] = useState("")
   
+  // Admin list state
+  const [admins, setAdmins] = useState<User[]>([])
+  const [loadingAdmins, setLoadingAdmins] = useState(true)
+  const [adminsSearchQuery, setAdminsSearchQuery] = useState("")
+  const [processingAdminIds, setProcessingAdminIds] = useState<Set<string>>(new Set())
+  
   // Stock returns state
   const [stockReturns, setStockReturns] = useState<StockReturn[]>([])
   const [loadingReturns, setLoadingReturns] = useState(true)
@@ -147,6 +153,23 @@ export default function SuperAdminDashboard({ userName }: SuperAdminDashboardPro
     loadStockReturns()
   }, [loadStockReturns])
 
+  // Load all admins
+  useEffect(() => {
+    const loadAdmins = async () => {
+      try {
+        setLoadingAdmins(true)
+        const allAdmins = await usersApi.getAll("admin")
+        setAdmins(allAdmins)
+      } catch (err) {
+        console.error("Failed to load admins:", err)
+        setAdmins([])
+      } finally {
+        setLoadingAdmins(false)
+      }
+    }
+    loadAdmins()
+  }, [])
+
   const handleProcessReturn = async (returnId: string) => {
     try {
       setProcessingReturnIds((prev) => new Set(prev).add(returnId))
@@ -200,6 +223,28 @@ export default function SuperAdminDashboard({ userName }: SuperAdminDashboardPro
       setProcessingAgentIds((prev) => {
         const next = new Set(prev)
         next.delete(agentId)
+        return next
+      })
+    }
+  }
+
+  // Handle block/unblock admin
+  const handleToggleAdminStatus = async (adminId: string, currentStatus: boolean) => {
+    try {
+      setProcessingAdminIds((prev) => new Set(prev).add(adminId))
+      const newStatus = !currentStatus
+      await usersApi.update(adminId, { is_active: newStatus })
+      // Reload admins list to update the UI
+      const allAdmins = await usersApi.getAll("admin")
+      setAdmins(allAdmins)
+    } catch (err: any) {
+      console.error("Failed to update admin status:", err)
+      const errorMsg = err?.message || err?.data?.error || "Failed to update admin status. Please try again."
+      alert(errorMsg)
+    } finally {
+      setProcessingAdminIds((prev) => {
+        const next = new Set(prev)
+        next.delete(adminId)
         return next
       })
     }
@@ -369,14 +414,18 @@ export default function SuperAdminDashboard({ userName }: SuperAdminDashboardPro
       {/* Tabs Navigation */}
       <Tabs value={activeTab} onValueChange={setActiveTab} className="w-full">
         <div className="w-full mb-6 sm:mb-8 bg-slate-900 rounded-lg p-1">
-          <TabsList className="bg-slate-900 border-0 p-0 w-full grid grid-cols-2 md:grid-cols-4 gap-2">
+          <TabsList className="bg-slate-900 border-0 p-0 w-full grid grid-cols-2 md:grid-cols-5 gap-2">
             <TabsTrigger value="overview" className="data-[state=active]:bg-blue-600 data-[state=active]:text-white text-slate-300 bg-slate-800 hover:bg-slate-700 text-[11px] sm:text-xs px-3 py-2 rounded-md transition-all flex items-center justify-center">
               <Package className="w-3.5 h-3.5 sm:w-4 sm:h-4 mr-1.5" />
               <span>Overview</span>
             </TabsTrigger>
-            <TabsTrigger value="approvals" className="data-[state=active]:bg-amber-600 data-[state=active]:text-white text-slate-300 bg-slate-800 hover:bg-slate-700 text-[11px] sm:text-xs px-3 py-2 rounded-md transition-all flex items-center justify-center">
-              <CheckCircle className="w-3.5 h-3.5 sm:w-4 sm:h-4 mr-1.5" />
-              <span>Approvals</span>
+            <TabsTrigger value="stock-requests" className="data-[state=active]:bg-amber-600 data-[state=active]:text-white text-slate-300 bg-slate-800 hover:bg-slate-700 text-[11px] sm:text-xs px-3 py-2 rounded-md transition-all flex items-center justify-center">
+              <TrendingUp className="w-3.5 h-3.5 sm:w-4 sm:h-4 mr-1.5" />
+              <span>Stock Requests</span>
+            </TabsTrigger>
+            <TabsTrigger value="agent-approvals" className="data-[state=active]:bg-cyan-600 data-[state=active]:text-white text-slate-300 bg-slate-800 hover:bg-slate-700 text-[11px] sm:text-xs px-3 py-2 rounded-md transition-all flex items-center justify-center">
+              <Users className="w-3.5 h-3.5 sm:w-4 sm:h-4 mr-1.5" />
+              <span>Agent Approvals</span>
             </TabsTrigger>
             <TabsTrigger value="returns" className="data-[state=active]:bg-orange-600 data-[state=active]:text-white text-slate-300 bg-slate-800 hover:bg-slate-700 text-[11px] sm:text-xs px-3 py-2 rounded-md transition-all flex items-center justify-center">
               <RotateCcw className="w-3.5 h-3.5 sm:w-4 sm:h-4 mr-1.5" />
@@ -601,7 +650,7 @@ export default function SuperAdminDashboard({ userName }: SuperAdminDashboardPro
       </div>
         </TabsContent>
 
-        <TabsContent value="approvals" className="mt-4 space-y-6">
+        <TabsContent value="stock-requests" className="mt-4 space-y-6">
           {/* Stock Requests List */}
           <div className="space-y-4">
             <div className="flex items-center justify-between flex-wrap gap-4">
@@ -683,7 +732,9 @@ export default function SuperAdminDashboard({ userName }: SuperAdminDashboardPro
             )}
             </div>
           </div>
+        </TabsContent>
 
+        <TabsContent value="agent-approvals" className="mt-4 space-y-6">
           {/* Pending Agent Approvals Section */}
           {filteredPendingAgents.length > 0 ? (
             <div className="space-y-4">
@@ -1018,6 +1069,213 @@ export default function SuperAdminDashboard({ userName }: SuperAdminDashboardPro
                 Create Admin
               </Button>
             </Card>
+
+            {/* Admins List Section */}
+            <div className="space-y-4">
+              <div className="flex items-center justify-between flex-wrap gap-4">
+                <h2 className="text-xl font-bold text-white flex items-center gap-2">
+                  <Users className="w-5 h-5 text-purple-500" />
+                  All Admins ({admins.length})
+                </h2>
+              </div>
+
+              {/* Search for Admins */}
+              <div className="relative">
+                <Search className="w-4 h-4 absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" />
+                <input
+                  type="text"
+                  placeholder="Search admins by name or username..."
+                  value={adminsSearchQuery}
+                  onChange={(e) => setAdminsSearchQuery(e.target.value)}
+                  className="w-full pl-10 pr-4 py-2 bg-slate-700 border border-slate-600 rounded-lg text-white placeholder-slate-500 focus:outline-none focus:border-purple-500"
+                />
+              </div>
+
+              {loadingAdmins ? (
+                <Card className="bg-slate-800 border-slate-700 p-8 text-center">
+                  <Loader2 className="w-8 h-8 animate-spin text-purple-500 mx-auto mb-4" />
+                  <p className="text-slate-400">Loading admins...</p>
+                </Card>
+              ) : (
+                <>
+                  {(() => {
+                    const filteredAdmins = admins.filter((admin) => {
+                      if (!adminsSearchQuery) return true
+                      const searchLower = adminsSearchQuery.toLowerCase()
+                      return (
+                        admin.name.toLowerCase().includes(searchLower) ||
+                        admin.username.toLowerCase().includes(searchLower)
+                      )
+                    })
+
+                    return filteredAdmins.length > 0 ? (
+                      <>
+                        {/* Mobile Card View */}
+                        <div className="block lg:hidden space-y-3">
+                          {filteredAdmins.map((admin) => (
+                            <Card key={admin.id} className="bg-slate-800 border-slate-700 p-4">
+                              <div className="space-y-3">
+                                <div className="flex items-start justify-between gap-2">
+                                  <div className="flex-1 min-w-0">
+                                    <p className="text-white font-semibold text-sm">{admin.name}</p>
+                                    <p className="text-xs text-slate-400">@{admin.username}</p>
+                                  </div>
+                                  <span
+                                    className={`px-2 py-1 text-xs font-semibold rounded-full ${
+                                      admin.is_active
+                                        ? "bg-green-500/20 text-green-400 border border-green-500/50"
+                                        : "bg-amber-500/20 text-amber-400 border border-amber-500/50"
+                                    }`}
+                                  >
+                                    {admin.is_active ? "Active" : "Inactive"}
+                                  </span>
+                                </div>
+                                <div className="pt-2 border-t border-slate-700">
+                                  <div className="grid grid-cols-2 gap-2 text-xs mb-3">
+                                    <div>
+                                      <p className="text-slate-400">Role</p>
+                                      <p className="text-slate-300 font-medium capitalize">{admin.role}</p>
+                                    </div>
+                                    <div>
+                                      <p className="text-slate-400">Created</p>
+                                      <p className="text-slate-300">
+                                        {formatDateISO(admin.created_at)}
+                                      </p>
+                                    </div>
+                                  </div>
+                                  <Button
+                                    size="sm"
+                                    onClick={() => handleToggleAdminStatus(admin.id, admin.is_active)}
+                                    disabled={processingAdminIds.has(admin.id)}
+                                    className={`w-full text-xs ${
+                                      admin.is_active
+                                        ? "bg-red-600 hover:bg-red-700 text-white"
+                                        : "bg-green-600 hover:bg-green-700 text-white"
+                                    }`}
+                                  >
+                                    {processingAdminIds.has(admin.id) ? (
+                                      <Loader2 className="w-3 h-3 animate-spin mr-1" />
+                                    ) : admin.is_active ? (
+                                      <>
+                                        <XCircle className="w-3 h-3 mr-1" />
+                                        Block Admin
+                                      </>
+                                    ) : (
+                                      <>
+                                        <CheckCircle className="w-3 h-3 mr-1" />
+                                        Unblock Admin
+                                      </>
+                                    )}
+                                  </Button>
+                                </div>
+                              </div>
+                            </Card>
+                          ))}
+                        </div>
+
+                        {/* Desktop Table View */}
+                        <div className="hidden lg:block bg-slate-800 border border-slate-700 rounded-lg overflow-hidden">
+                          <div className="overflow-x-auto">
+                            <table className="w-full">
+                              <thead className="bg-slate-700/50 border-b border-slate-700">
+                                <tr>
+                                  <th className="px-6 py-3 text-left text-sm font-semibold text-slate-300">
+                                    Name
+                                  </th>
+                                  <th className="px-6 py-3 text-left text-sm font-semibold text-slate-300">
+                                    Username
+                                  </th>
+                                  <th className="px-6 py-3 text-left text-sm font-semibold text-slate-300">
+                                    Role
+                                  </th>
+                                  <th className="px-6 py-3 text-left text-sm font-semibold text-slate-300">
+                                    Status
+                                  </th>
+                                  <th className="px-6 py-3 text-left text-sm font-semibold text-slate-300">
+                                    Created Date
+                                  </th>
+                                  <th className="px-6 py-3 text-left text-sm font-semibold text-slate-300">
+                                    Actions
+                                  </th>
+                                </tr>
+                              </thead>
+                              <tbody className="divide-y divide-slate-700">
+                                {filteredAdmins.map((admin) => (
+                                  <tr
+                                    key={admin.id}
+                                    className="hover:bg-slate-700/30 transition"
+                                  >
+                                    <td className="px-6 py-4 text-white font-medium">
+                                      {admin.name}
+                                    </td>
+                                    <td className="px-6 py-4 text-slate-300">@{admin.username}</td>
+                                    <td className="px-6 py-4 text-slate-400 capitalize">
+                                      {admin.role}
+                                    </td>
+                                    <td className="px-6 py-4">
+                                      <span
+                                        className={`px-3 py-1 text-xs font-semibold rounded-full ${
+                                          admin.is_active
+                                            ? "bg-green-500/20 text-green-400 border border-green-500/50"
+                                            : "bg-amber-500/20 text-amber-400 border border-amber-500/50"
+                                        }`}
+                                      >
+                                        {admin.is_active ? "Active" : "Blocked"}
+                                      </span>
+                                    </td>
+                                    <td className="px-6 py-4 text-slate-400 text-sm">
+                                      {formatDateISO(admin.created_at)}
+                                    </td>
+                                    <td className="px-6 py-4">
+                                      <Button
+                                        size="sm"
+                                        onClick={() => handleToggleAdminStatus(admin.id, admin.is_active)}
+                                        disabled={processingAdminIds.has(admin.id)}
+                                        className={`text-xs ${
+                                          admin.is_active
+                                            ? "bg-red-600 hover:bg-red-700 text-white"
+                                            : "bg-green-600 hover:bg-green-700 text-white"
+                                        }`}
+                                      >
+                                        {processingAdminIds.has(admin.id) ? (
+                                          <Loader2 className="w-3 h-3 animate-spin" />
+                                        ) : admin.is_active ? (
+                                          <>
+                                            <XCircle className="w-3 h-3 mr-1" />
+                                            Block
+                                          </>
+                                        ) : (
+                                          <>
+                                            <CheckCircle className="w-3 h-3 mr-1" />
+                                            Unblock
+                                          </>
+                                        )}
+                                      </Button>
+                                    </td>
+                                  </tr>
+                                ))}
+                              </tbody>
+                            </table>
+                          </div>
+                        </div>
+                      </>
+                    ) : (
+                      <Card className="bg-slate-800 border-slate-700 p-8 text-center">
+                        <Users className="w-12 h-12 text-slate-500 mx-auto mb-4" />
+                        <p className="text-slate-400 text-lg font-semibold mb-2">
+                          {adminsSearchQuery ? "No admins found" : "No admins created yet"}
+                        </p>
+                        <p className="text-slate-500 text-sm">
+                          {adminsSearchQuery
+                            ? "Try adjusting your search query"
+                            : "Create your first admin using the button above"}
+                        </p>
+                      </Card>
+                    )
+                  })()}
+                </>
+              )}
+            </div>
           </div>
         </TabsContent>
       </Tabs>
@@ -1051,6 +1309,13 @@ export default function SuperAdminDashboard({ userName }: SuperAdminDashboardPro
           onClose={() => setShowCreateUserModal(false)}
           onSuccess={async () => {
             setShowCreateUserModal(false)
+            // Reload admins list after creating a new admin
+            try {
+              const allAdmins = await usersApi.getAll("admin")
+              setAdmins(allAdmins)
+            } catch (err) {
+              console.error("Failed to reload admins:", err)
+            }
           }}
         />
       )}
