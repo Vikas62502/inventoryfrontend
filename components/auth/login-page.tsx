@@ -102,7 +102,21 @@ export default function LoginPage({ onLogin }: LoginPageProps) {
         const apiError = typeof apiErrorRaw === 'string' ? apiErrorRaw : JSON.stringify(apiErrorRaw)
         const apiErrorLower = apiError.toLowerCase()
         
-        if (err.status === 401) {
+        if (err.status === 400) {
+          // Validation errors - show detailed message
+          const validationErrors = err.data?.errors || err.data?.error
+          if (Array.isArray(validationErrors)) {
+            errorMessage = validationErrors.join(", ")
+          } else if (typeof validationErrors === 'object' && validationErrors !== null) {
+            // Field-specific validation errors
+            const fieldErrors = Object.entries(validationErrors)
+              .map(([field, message]) => `${field}: ${message}`)
+              .join(", ")
+            errorMessage = fieldErrors || apiError || "Validation error. Please check your input."
+          } else {
+            errorMessage = apiError || "Validation error. Please check your input."
+          }
+        } else if (err.status === 401) {
           // Handle specific error messages
           if (apiErrorLower.includes("inactive") || apiErrorLower.includes("account is inactive")) {
             errorMessage = "Your account is inactive and needs approval. Please contact your administrator or account manager to activate your account."

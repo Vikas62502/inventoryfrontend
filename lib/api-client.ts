@@ -96,10 +96,50 @@ class ApiClient {
 
         // Ensure error message is always a string
         let errorMessage = `HTTP error! status: ${response.status}`
-        if (data.error) {
-          errorMessage = typeof data.error === 'string' 
-            ? data.error 
-            : (data.error.message || JSON.stringify(data.error))
+        
+        // Handle nested error structure (data.error)
+        const errorData = data.error || data
+        
+        // Handle validation errors (400) with detailed messages
+        if (response.status === 400) {
+          // Check for details array first (common in validation errors)
+          if (errorData.details && Array.isArray(errorData.details) && errorData.details.length > 0) {
+            const detailMessages = errorData.details.map((detail: any) => {
+              if (typeof detail === 'string') {
+                return detail
+              } else if (detail?.message) {
+                return detail.message
+              } else if (detail?.field && detail?.message) {
+                return `${detail.field}: ${detail.message}`
+              } else if (detail?.path && detail?.message) {
+                return `${detail.path}: ${detail.message}`
+              } else {
+                return JSON.stringify(detail)
+              }
+            })
+            errorMessage = detailMessages.join(", ")
+          } else if (errorData.errors && Array.isArray(errorData.errors)) {
+            errorMessage = errorData.errors.join(", ")
+          } else if (errorData.errors && typeof errorData.errors === 'object') {
+            // Field-specific validation errors
+            const fieldErrors = Object.entries(errorData.errors)
+              .map(([field, message]) => `${field}: ${message}`)
+              .join(", ")
+            errorMessage = fieldErrors || errorData.message || (typeof errorData === 'string' ? errorData : errorMessage)
+          } else if (errorData.message) {
+            errorMessage = errorData.message
+          } else if (typeof errorData === 'string') {
+            errorMessage = errorData
+          } else if (errorData?.details) {
+            // Try to stringify if it's an object with details
+            errorMessage = JSON.stringify(errorData.details)
+          }
+        } else if (typeof errorData === 'string') {
+          errorMessage = errorData
+        } else if (errorData?.message) {
+          errorMessage = errorData.message
+        } else if (data.message) {
+          errorMessage = data.message
         }
 
         throw new ApiClientError(
