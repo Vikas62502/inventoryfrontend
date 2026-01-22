@@ -13,6 +13,7 @@ import { useStockRequestsState } from "@/hooks/use-stock-requests-state"
 import { productsApi, stockRequestsApi, categoriesApi, usersApi, stockReturnsApi } from "@/lib/api"
 import { authService, type User } from "@/lib/auth"
 import { formatDateISO } from "@/lib/utils"
+import { FEATURE_FLAGS } from "@/lib/feature-flags"
 import type { Product } from "@/lib/api"
 import type { StockRequest, StockReturn } from "@/lib/api"
 
@@ -32,6 +33,7 @@ export default function SuperAdminDashboard({ userName }: SuperAdminDashboardPro
   const [showProductModal, setShowProductModal] = useState(false)
   const [showApprovalModal, setShowApprovalModal] = useState(false)
   const [showCreateUserModal, setShowCreateUserModal] = useState(false)
+  const [createUserTargetRole, setCreateUserTargetRole] = useState<"admin" | "super-admin-manager">("admin")
   const [selectedRequest, setSelectedRequest] = useState<StockRequest | null>(null)
   const [editingProduct, setEditingProduct] = useState<Product | null>(null)
   const [searchTerm, setSearchTerm] = useState("")
@@ -51,6 +53,12 @@ export default function SuperAdminDashboard({ userName }: SuperAdminDashboardPro
   const [loadingAdmins, setLoadingAdmins] = useState(true)
   const [adminsSearchQuery, setAdminsSearchQuery] = useState("")
   const [processingAdminIds, setProcessingAdminIds] = useState<Set<string>>(new Set())
+  
+  // Product Manager list state
+  const [productManagers, setProductManagers] = useState<User[]>([])
+  const [loadingProductManagers, setLoadingProductManagers] = useState(true)
+  const [productManagersSearchQuery, setProductManagersSearchQuery] = useState("")
+  const [processingManagerIds, setProcessingManagerIds] = useState<Set<string>>(new Set())
   
   // Stock returns state
   const [stockReturns, setStockReturns] = useState<StockReturn[]>([])
@@ -170,6 +178,28 @@ export default function SuperAdminDashboard({ userName }: SuperAdminDashboardPro
     loadAdmins()
   }, [])
 
+  // Load all product managers (only if feature is enabled)
+  useEffect(() => {
+    if (!FEATURE_FLAGS.ENABLE_PRODUCT_MANAGER_ROLE) {
+      setLoadingProductManagers(false)
+      return
+    }
+    
+    const loadProductManagers = async () => {
+      try {
+        setLoadingProductManagers(true)
+        const allManagers = await usersApi.getAll("super-admin-manager")
+        setProductManagers(allManagers)
+      } catch (err) {
+        console.error("Failed to load product managers:", err)
+        setProductManagers([])
+      } finally {
+        setLoadingProductManagers(false)
+      }
+    }
+    loadProductManagers()
+  }, [])
+
   const handleProcessReturn = async (returnId: string) => {
     try {
       setProcessingReturnIds((prev) => new Set(prev).add(returnId))
@@ -245,6 +275,30 @@ export default function SuperAdminDashboard({ userName }: SuperAdminDashboardPro
       setProcessingAdminIds((prev) => {
         const next = new Set(prev)
         next.delete(adminId)
+        return next
+      })
+    }
+  }
+
+  // Handle block/unblock product manager
+  const handleToggleManagerStatus = async (managerId: string, currentStatus: boolean) => {
+    if (!FEATURE_FLAGS.ENABLE_PRODUCT_MANAGER_ROLE) return
+    
+    try {
+      setProcessingManagerIds((prev) => new Set(prev).add(managerId))
+      const newStatus = !currentStatus
+      await usersApi.update(managerId, { is_active: newStatus })
+      // Reload managers list to update the UI
+      const allManagers = await usersApi.getAll("super-admin-manager")
+      setProductManagers(allManagers)
+    } catch (err: any) {
+      console.error("Failed to update manager status:", err)
+      const errorMsg = err?.message || err?.data?.error || "Failed to update manager status. Please try again."
+      alert(errorMsg)
+    } finally {
+      setProcessingManagerIds((prev) => {
+        const next = new Set(prev)
+        next.delete(managerId)
         return next
       })
     }
@@ -765,7 +819,7 @@ export default function SuperAdminDashboard({ userName }: SuperAdminDashboardPro
                       <div className="flex items-start justify-between gap-2">
                         <div className="flex-1 min-w-0">
                           <p className="text-white font-semibold text-sm">{agent.name}</p>
-                          <p className="text-xs text-slate-400 mt-1">@{agent.username}</p>
+                          <p className="text-xs text-slate-400 mt-1">{agent.username}</p>
                         </div>
                         <span className="px-2 py-1 text-xs font-semibold bg-amber-500/20 text-amber-400 border border-amber-500/50 rounded-full whitespace-nowrap">
                           Pending
@@ -1047,28 +1101,52 @@ export default function SuperAdminDashboard({ userName }: SuperAdminDashboardPro
                 <UserPlus className="w-5 h-5 text-purple-500" />
                 User Management
               </h2>
-              <Button
-                onClick={() => setShowCreateUserModal(true)}
-                className="bg-purple-600 hover:bg-purple-700 text-white hover:text-slate-100"
-              >
-                <UserPlus className="w-4 h-4 mr-2" />
-                Create Admin
-              </Button>
             </div>
 
-            <Card className="bg-slate-800 border-slate-700 p-6">
-              <h3 className="text-lg font-semibold text-white mb-4">Create New Admin User</h3>
-              <p className="text-slate-400 mb-4">
-                Create a new admin user who can manage agents and stock requests.
-              </p>
-              <Button
-                onClick={() => setShowCreateUserModal(true)}
-                className="bg-purple-600 hover:bg-purple-700 text-white hover:text-slate-100"
-              >
-                <UserPlus className="w-4 h-4 mr-2" />
-                Create Admin
-              </Button>
-            </Card>
+            {/* Create User Cards */}
+            <div className={`grid grid-cols-1 ${FEATURE_FLAGS.ENABLE_PRODUCT_MANAGER_ROLE ? 'md:grid-cols-2' : ''} gap-4`}>
+              {FEATURE_FLAGS.ENABLE_PRODUCT_MANAGER_ROLE && (
+                <Card className="bg-slate-800 border-slate-700 p-6">
+                  <h3 className="text-lg font-semibold text-white mb-2 flex items-center gap-2">
+                    <Package className="w-5 h-5 text-blue-500" />
+                    Product Manager
+                  </h3>
+                  <p className="text-slate-400 mb-4 text-sm">
+                    Create a product manager who can add, edit, and manage all products in the system.
+                  </p>
+                  <Button
+                    onClick={() => {
+                      setCreateUserTargetRole("super-admin-manager")
+                      setShowCreateUserModal(true)
+                    }}
+                    className="bg-blue-600 hover:bg-blue-700 text-white w-full"
+                  >
+                    <UserPlus className="w-4 h-4 mr-2" />
+                    Create Product Manager
+                  </Button>
+                </Card>
+              )}
+
+              <Card className="bg-slate-800 border-slate-700 p-6">
+                <h3 className="text-lg font-semibold text-white mb-2 flex items-center gap-2">
+                  <Users className="w-5 h-5 text-purple-500" />
+                  Admin User
+                </h3>
+                <p className="text-slate-400 mb-4 text-sm">
+                  Create an admin user who can manage agents and stock requests.
+                </p>
+                <Button
+                  onClick={() => {
+                    setCreateUserTargetRole("admin")
+                    setShowCreateUserModal(true)
+                  }}
+                  className="bg-purple-600 hover:bg-purple-700 text-white w-full"
+                >
+                  <UserPlus className="w-4 h-4 mr-2" />
+                  Create Admin
+                </Button>
+              </Card>
+            </div>
 
             {/* Admins List Section */}
             <div className="space-y-4">
@@ -1118,7 +1196,7 @@ export default function SuperAdminDashboard({ userName }: SuperAdminDashboardPro
                                 <div className="flex items-start justify-between gap-2">
                                   <div className="flex-1 min-w-0">
                                     <p className="text-white font-semibold text-sm">{admin.name}</p>
-                                    <p className="text-xs text-slate-400">@{admin.username}</p>
+                                    <p className="text-xs text-slate-400">{admin.username}</p>
                                   </div>
                                   <span
                                     className={`px-2 py-1 text-xs font-semibold rounded-full ${
@@ -1145,7 +1223,7 @@ export default function SuperAdminDashboard({ userName }: SuperAdminDashboardPro
                                   </div>
                                   <Button
                                     size="sm"
-                                    onClick={() => handleToggleAdminStatus(admin.id, admin.is_active)}
+                                    onClick={() => handleToggleAdminStatus(admin.id, admin.is_active || false)}
                                     disabled={processingAdminIds.has(admin.id)}
                                     className={`w-full text-xs ${
                                       admin.is_active
@@ -1208,7 +1286,7 @@ export default function SuperAdminDashboard({ userName }: SuperAdminDashboardPro
                                     <td className="px-6 py-4 text-white font-medium">
                                       {admin.name}
                                     </td>
-                                    <td className="px-6 py-4 text-slate-300">@{admin.username}</td>
+                                    <td className="px-6 py-4 text-slate-300">{admin.username}</td>
                                     <td className="px-6 py-4 text-slate-400 capitalize">
                                       {admin.role}
                                     </td>
@@ -1229,7 +1307,7 @@ export default function SuperAdminDashboard({ userName }: SuperAdminDashboardPro
                                     <td className="px-6 py-4">
                                       <Button
                                         size="sm"
-                                        onClick={() => handleToggleAdminStatus(admin.id, admin.is_active)}
+                                        onClick={() => handleToggleAdminStatus(admin.id, admin.is_active || false)}
                                         disabled={processingAdminIds.has(admin.id)}
                                         className={`text-xs ${
                                           admin.is_active
@@ -1276,6 +1354,215 @@ export default function SuperAdminDashboard({ userName }: SuperAdminDashboardPro
                 </>
               )}
             </div>
+
+            {/* Product Managers List Section */}
+            {FEATURE_FLAGS.ENABLE_PRODUCT_MANAGER_ROLE && (
+            <div className="space-y-4">
+              <div className="flex items-center justify-between flex-wrap gap-4">
+                <h2 className="text-xl font-bold text-white flex items-center gap-2">
+                  <Package className="w-5 h-5 text-blue-500" />
+                  Product Managers ({productManagers.length})
+                </h2>
+              </div>
+
+              {/* Search for Product Managers */}
+              <div className="relative">
+                <Search className="w-4 h-4 absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" />
+                <input
+                  type="text"
+                  placeholder="Search product managers by name or username..."
+                  value={productManagersSearchQuery}
+                  onChange={(e) => setProductManagersSearchQuery(e.target.value)}
+                  className="w-full pl-10 pr-4 py-2 bg-slate-700 border border-slate-600 rounded-lg text-white placeholder-slate-500 focus:outline-none focus:border-blue-500"
+                />
+              </div>
+
+              {loadingProductManagers ? (
+                <Card className="bg-slate-800 border-slate-700 p-8 text-center">
+                  <Loader2 className="w-8 h-8 animate-spin text-blue-500 mx-auto mb-4" />
+                  <p className="text-slate-400">Loading product managers...</p>
+                </Card>
+              ) : (
+                <>
+                  {(() => {
+                    const filteredManagers = productManagers.filter((manager) => {
+                      if (!productManagersSearchQuery) return true
+                      const searchLower = productManagersSearchQuery.toLowerCase()
+                      return (
+                        manager.name.toLowerCase().includes(searchLower) ||
+                        manager.username.toLowerCase().includes(searchLower)
+                      )
+                    })
+
+                    return filteredManagers.length > 0 ? (
+                      <>
+                        {/* Mobile Card View */}
+                        <div className="block lg:hidden space-y-3">
+                          {filteredManagers.map((manager) => (
+                            <Card key={manager.id} className="bg-slate-800 border-slate-700 p-4">
+                              <div className="space-y-3">
+                                <div className="flex items-start justify-between gap-2">
+                                  <div className="flex-1 min-w-0">
+                                    <p className="text-white font-semibold text-sm">{manager.name}</p>
+                                    <p className="text-xs text-slate-400">{manager.username}</p>
+                                  </div>
+                                  <span
+                                    className={`px-2 py-1 text-xs font-semibold rounded-full ${
+                                      manager.is_active
+                                        ? "bg-green-500/20 text-green-400 border border-green-500/50"
+                                        : "bg-amber-500/20 text-amber-400 border border-amber-500/50"
+                                    }`}
+                                  >
+                                    {manager.is_active ? "Active" : "Blocked"}
+                                  </span>
+                                </div>
+                                <div className="pt-2 border-t border-slate-700">
+                                  <div className="grid grid-cols-2 gap-2 text-xs mb-3">
+                                    <div>
+                                      <p className="text-slate-400">Role</p>
+                                      <p className="text-slate-300 font-medium">Product Manager</p>
+                                    </div>
+                                    <div>
+                                      <p className="text-slate-400">Created</p>
+                                      <p className="text-slate-300">
+                                        {formatDateISO(manager.created_at)}
+                                      </p>
+                                    </div>
+                                  </div>
+                                  <Button
+                                    size="sm"
+                                    onClick={() => handleToggleManagerStatus(manager.id, manager.is_active || false)}
+                                    disabled={processingManagerIds.has(manager.id)}
+                                    className={`w-full text-xs ${
+                                      manager.is_active
+                                        ? "bg-red-600 hover:bg-red-700 text-white"
+                                        : "bg-green-600 hover:bg-green-700 text-white"
+                                    }`}
+                                  >
+                                    {processingManagerIds.has(manager.id) ? (
+                                      <Loader2 className="w-3 h-3 animate-spin mr-1" />
+                                    ) : manager.is_active ? (
+                                      <>
+                                        <XCircle className="w-3 h-3 mr-1" />
+                                        Block Manager
+                                      </>
+                                    ) : (
+                                      <>
+                                        <CheckCircle className="w-3 h-3 mr-1" />
+                                        Unblock Manager
+                                      </>
+                                    )}
+                                  </Button>
+                                </div>
+                              </div>
+                            </Card>
+                          ))}
+                        </div>
+
+                        {/* Desktop Table View */}
+                        <div className="hidden lg:block bg-slate-800 border border-slate-700 rounded-lg overflow-hidden">
+                          <div className="overflow-x-auto">
+                            <table className="w-full">
+                              <thead className="bg-slate-700/50 border-b border-slate-700">
+                                <tr>
+                                  <th className="px-6 py-3 text-left text-sm font-semibold text-slate-300">
+                                    Name
+                                  </th>
+                                  <th className="px-6 py-3 text-left text-sm font-semibold text-slate-300">
+                                    Username
+                                  </th>
+                                  <th className="px-6 py-3 text-left text-sm font-semibold text-slate-300">
+                                    Role
+                                  </th>
+                                  <th className="px-6 py-3 text-left text-sm font-semibold text-slate-300">
+                                    Status
+                                  </th>
+                                  <th className="px-6 py-3 text-left text-sm font-semibold text-slate-300">
+                                    Created Date
+                                  </th>
+                                  <th className="px-6 py-3 text-left text-sm font-semibold text-slate-300">
+                                    Actions
+                                  </th>
+                                </tr>
+                              </thead>
+                              <tbody className="divide-y divide-slate-700">
+                                {filteredManagers.map((manager) => (
+                                  <tr
+                                    key={manager.id}
+                                    className="hover:bg-slate-700/30 transition"
+                                  >
+                                    <td className="px-6 py-4 text-white font-medium">
+                                      {manager.name}
+                                    </td>
+                                    <td className="px-6 py-4 text-slate-300">{manager.username}</td>
+                                    <td className="px-6 py-4 text-slate-400">
+                                      Product Manager
+                                    </td>
+                                    <td className="px-6 py-4">
+                                      <span
+                                        className={`px-3 py-1 text-xs font-semibold rounded-full ${
+                                          manager.is_active
+                                            ? "bg-green-500/20 text-green-400 border border-green-500/50"
+                                            : "bg-amber-500/20 text-amber-400 border border-amber-500/50"
+                                        }`}
+                                      >
+                                        {manager.is_active ? "Active" : "Blocked"}
+                                      </span>
+                                    </td>
+                                    <td className="px-6 py-4 text-slate-400 text-sm">
+                                      {formatDateISO(manager.created_at)}
+                                    </td>
+                                    <td className="px-6 py-4">
+                                      <Button
+                                        size="sm"
+                                        onClick={() => handleToggleManagerStatus(manager.id, manager.is_active || false)}
+                                        disabled={processingManagerIds.has(manager.id)}
+                                        className={`text-xs ${
+                                          manager.is_active
+                                            ? "bg-red-600 hover:bg-red-700 text-white"
+                                            : "bg-green-600 hover:bg-green-700 text-white"
+                                        }`}
+                                      >
+                                        {processingManagerIds.has(manager.id) ? (
+                                          <Loader2 className="w-3 h-3 animate-spin" />
+                                        ) : manager.is_active ? (
+                                          <>
+                                            <XCircle className="w-3 h-3 mr-1" />
+                                            Block
+                                          </>
+                                        ) : (
+                                          <>
+                                            <CheckCircle className="w-3 h-3 mr-1" />
+                                            Unblock
+                                          </>
+                                        )}
+                                      </Button>
+                                    </td>
+                                  </tr>
+                                ))}
+                              </tbody>
+                            </table>
+                          </div>
+                        </div>
+                      </>
+                    ) : (
+                      <Card className="bg-slate-800 border-slate-700 p-8 text-center">
+                        <Package className="w-12 h-12 text-slate-500 mx-auto mb-4" />
+                        <p className="text-slate-400 text-lg font-semibold mb-2">
+                          {productManagersSearchQuery ? "No product managers found" : "No product managers created yet"}
+                        </p>
+                        <p className="text-slate-500 text-sm">
+                          {productManagersSearchQuery
+                            ? "Try adjusting your search query"
+                            : "Create your first product manager using the button above"}
+                        </p>
+                      </Card>
+                    )
+                  })()}
+                </>
+              )}
+            </div>
+            )}
           </div>
         </TabsContent>
       </Tabs>
@@ -1306,15 +1593,21 @@ export default function SuperAdminDashboard({ userName }: SuperAdminDashboardPro
       {showCreateUserModal && (
         <CreateUserModal
           creatorRole="super-admin"
+          targetRole={createUserTargetRole}
           onClose={() => setShowCreateUserModal(false)}
           onSuccess={async () => {
             setShowCreateUserModal(false)
-            // Reload admins list after creating a new admin
+            // Reload appropriate list based on target role
             try {
-              const allAdmins = await usersApi.getAll("admin")
-              setAdmins(allAdmins)
+              if (createUserTargetRole === "admin") {
+                const allAdmins = await usersApi.getAll("admin")
+                setAdmins(allAdmins)
+              } else if (createUserTargetRole === "super-admin-manager" && FEATURE_FLAGS.ENABLE_PRODUCT_MANAGER_ROLE) {
+                const allManagers = await usersApi.getAll("super-admin-manager")
+                setProductManagers(allManagers)
+              }
             } catch (err) {
-              console.error("Failed to reload admins:", err)
+              console.error("Failed to reload users:", err)
             }
           }}
         />

@@ -3,11 +3,10 @@
 import { useState, useEffect } from "react"
 import { Card } from "@/components/ui/card"
 import { Button } from "@/components/ui/button"
-import { X, Loader2, AlertCircle } from "lucide-react"
+import { X, Loader2, AlertCircle, Plus, Trash2 } from "lucide-react"
 import { productsApi, type Product } from "@/lib/api"
 import { stockRequestsApi } from "@/lib/api"
 import { authService } from "@/lib/auth"
-import AddressFields, { type Address } from "@/components/forms/address-fields"
 
 interface AgentStockRequestModalProps {
   onClose: () => void
@@ -20,42 +19,8 @@ export default function AgentStockRequestModal({ onClose, onSuccess }: AgentStoc
   const [error, setError] = useState<string | null>(null)
   const [isSubmitting, setIsSubmitting] = useState(false)
   
-  const [requestType, setRequestType] = useState<"b2b" | "b2c" | null>(null)
-  const [items, setItems] = useState<Array<{ product_id: string; quantity: number }>>([])
+  const [items, setItems] = useState<Array<{ product_id: string; quantity: number }>>([{ product_id: "", quantity: 0 }])
   const [notes, setNotes] = useState("")
-  
-  // Address structure matching the Address model
-  const emptyAddress: Address = {
-    line1: "",
-    line2: "",
-    city: "",
-    state: "",
-    postal_code: "",
-    country: "",
-  }
-  
-  // B2B fields
-  const [b2bFields, setB2bFields] = useState({
-    customer_name: "",
-    company_name: "",
-    gst_number: "",
-    contact_person: "",
-    customer_email: "",
-    customer_phone: "",
-    billing_address: { ...emptyAddress },
-    delivery_address: { ...emptyAddress },
-    delivery_matches_billing: false,
-  })
-  
-  // B2C fields
-  const [b2cFields, setB2cFields] = useState({
-    customer_name: "",
-    customer_email: "",
-    customer_phone: "",
-    billing_address: { ...emptyAddress },
-    delivery_address: { ...emptyAddress },
-    delivery_matches_billing: false,
-  })
 
   useEffect(() => {
     const loadProducts = async () => {
@@ -89,107 +54,65 @@ export default function AgentStockRequestModal({ onClose, onSuccess }: AgentStoc
     e.preventDefault()
     setError(null)
     
-    if (!requestType) {
-      setError("Please select request type (B2B or B2C)")
-      return
-    }
-    
     if (items.length === 0) {
       setError("Please add at least one product")
       return
     }
-    
-    if (items.some(item => !item.product_id || item.quantity <= 0)) {
-      setError("Please fill all product details correctly")
-      return
-    }
-    
-    // Validate B2B fields
-    if (requestType === "b2b") {
-      if (!b2bFields.customer_name || !b2bFields.company_name || !b2bFields.contact_person) {
-        setError("Please fill all required B2B fields")
+
+    // Validate each item
+    for (const item of items) {
+      if (!item.product_id || item.quantity <= 0) {
+        setError("Please select a product and enter a valid quantity for all items")
         return
-      }
-      // Validate billing address
-      const billing = b2bFields.billing_address
-      if (!billing.line1 || !billing.city || !billing.state || !billing.postal_code || !billing.country) {
-        setError("Please fill all required billing address fields")
-        return
-      }
-      // Validate delivery address if different
-      if (!b2bFields.delivery_matches_billing) {
-        const delivery = b2bFields.delivery_address
-        if (!delivery.line1 || !delivery.city || !delivery.state || !delivery.postal_code || !delivery.country) {
-          setError("Please fill all required delivery address fields")
-          return
-        }
       }
     }
-    
-    // Validate B2C fields
-    if (requestType === "b2c") {
-      if (!b2cFields.customer_name || !b2cFields.customer_phone) {
-        setError("Please fill all required B2C fields")
-        return
-      }
-      // Validate billing address
-      const billing = b2cFields.billing_address
-      if (!billing.line1 || !billing.city || !billing.state || !billing.postal_code || !billing.country) {
-        setError("Please fill all required billing address fields")
-        return
-      }
-      // Validate delivery address if different
-      if (!b2cFields.delivery_matches_billing) {
-        const delivery = b2cFields.delivery_address
-        if (!delivery.line1 || !delivery.city || !delivery.state || !delivery.postal_code || !delivery.country) {
-          setError("Please fill all required delivery address fields")
-          return
-        }
-      }
-    }
-    
-    setIsSubmitting(true)
-    
+
     try {
-      // Create stock request with address and customer details
+      setIsSubmitting(true)
+      const currentUser = authService.getUser()
+      
       const requestData: any = {
-        requested_from: "admin", // Agent requests from admin
-        items: items,
-        notes: notes || `Request type: ${requestType.toUpperCase()}. ${requestType === "b2b" ? `Customer: ${b2bFields.customer_name}, Company: ${b2bFields.company_name}` : `Customer: ${b2cFields.customer_name}`}`,
-        request_type: requestType,
+        requested_from: currentUser?.created_by_id || "",
+        items: items.map(item => ({ 
+          product_id: item.product_id, 
+          quantity: parseInt(item.quantity.toString()) 
+        })),
+        notes: notes || "Stock request from agent",
+        status: "pending",
       }
 
-      // Add B2B fields
-      if (requestType === "b2b") {
-        requestData.customer_name = b2bFields.customer_name
-        requestData.company_name = b2bFields.company_name
-        requestData.gst_number = b2bFields.gst_number || undefined
-        requestData.contact_person = b2bFields.contact_person
-        requestData.customer_email = b2bFields.customer_email || undefined
-        requestData.customer_phone = b2bFields.customer_phone || undefined
-        requestData.billing_address = b2bFields.billing_address
-        if (!b2bFields.delivery_matches_billing) {
-          requestData.delivery_address = b2bFields.delivery_address
-        }
-      }
-
-      // Add B2C fields
-      if (requestType === "b2c") {
-        requestData.customer_name = b2cFields.customer_name
-        requestData.customer_email = b2cFields.customer_email || undefined
-        requestData.customer_phone = b2cFields.customer_phone
-        requestData.billing_address = b2cFields.billing_address
-        if (!b2cFields.delivery_matches_billing) {
-          requestData.delivery_address = b2cFields.delivery_address
-        }
-      }
-
+      console.log("Creating stock request:", requestData)
       await stockRequestsApi.create(requestData)
       
       onSuccess()
       onClose()
     } catch (err: any) {
-      setError(err.message || "Failed to create stock request")
+      console.error("Failed to create stock request:", err)
+      
+      // Enhanced error handling
+      if (err && typeof err.status === 'number') {
+        const apiErrorRaw = err.data?.error || err.data?.message || err.message || ""
+        const apiError = typeof apiErrorRaw === 'string' ? apiErrorRaw : JSON.stringify(apiErrorRaw)
+
+        if (err.status === 400) {
+          const validationErrors = err.data?.details || err.data?.error
+          if (Array.isArray(validationErrors)) {
+            setError(validationErrors.join(", "))
+          } else if (typeof validationErrors === 'object' && validationErrors !== null) {
+            const fieldErrors = Object.entries(validationErrors)
+              .map(([field, message]) => `${field}: ${message}`)
+              .join(", ")
+            setError(fieldErrors || apiError || "Validation error. Please check your input.")
+          } else {
+            setError(apiError || "Validation error. Please check your input.")
+          }
+        } else {
+          setError(apiError || err.message || `Server error (${err.status}). Please try again.`)
+        }
+      } else {
+        setError(err.message || "Failed to create stock request. Please try again.")
+      }
+    } finally {
       setIsSubmitting(false)
     }
   }
@@ -211,7 +134,7 @@ export default function AgentStockRequestModal({ onClose, onSuccess }: AgentStoc
     <div className="fixed inset-0 bg-black/50 backdrop-blur-sm flex items-center justify-center p-2 sm:p-4 z-50">
       <Card className="bg-slate-800 border-slate-700 p-4 sm:p-6 lg:p-8 max-w-[95%] sm:max-w-xl md:max-w-2xl w-full my-4 sm:my-8 max-h-[95vh] overflow-y-auto">
         <div className="flex items-center justify-between mb-4 sm:mb-6 sticky top-0 bg-slate-800 pb-4 z-10">
-          <h2 className="text-xl sm:text-2xl font-bold text-white">New Stock Request</h2>
+          <h2 className="text-xl sm:text-2xl font-bold text-white">Request Stock from Admin</h2>
           <button onClick={onClose} className="text-slate-400 hover:text-white transition flex-shrink-0 ml-2">
             <X className="w-5 h-5 sm:w-6 sm:h-6" />
           </button>
@@ -225,281 +148,65 @@ export default function AgentStockRequestModal({ onClose, onSuccess }: AgentStoc
         )}
 
         <form onSubmit={handleSubmit} className="space-y-6">
-          {/* Request Type Selection */}
-          <div>
-            <label className="block text-sm font-medium text-slate-300 mb-3">Request Type *</label>
-            <div className="flex flex-col sm:flex-row gap-4">
-              <button
-                type="button"
-                onClick={() => {
-                  setRequestType("b2b")
-                  setError(null)
-                }}
-                className={`flex-1 p-4 rounded-lg border-2 transition ${
-                  requestType === "b2b"
-                    ? "border-blue-500 bg-blue-950/30"
-                    : "border-slate-600 bg-slate-700/50 hover:border-slate-500"
-                }`}
-              >
-                <p className="font-medium text-white">B2B</p>
-                <p className="text-xs text-slate-400 mt-1">Business to Business</p>
-              </button>
-              <button
-                type="button"
-                onClick={() => {
-                  setRequestType("b2c")
-                  setError(null)
-                }}
-                className={`flex-1 p-4 rounded-lg border-2 transition ${
-                  requestType === "b2c"
-                    ? "border-blue-500 bg-blue-950/30"
-                    : "border-slate-600 bg-slate-700/50 hover:border-slate-500"
-                }`}
-              >
-                <p className="font-medium text-white">B2C</p>
-                <p className="text-xs text-slate-400 mt-1">Business to Consumer</p>
-              </button>
-            </div>
-          </div>
-
-          {/* B2B Fields */}
-          {requestType === "b2b" && (
-            <div className="space-y-4 p-4 bg-slate-700/30 rounded-lg">
-              <h3 className="font-semibold text-white mb-3">B2B Customer Details</h3>
-              
-              <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-                <div>
-                  <label className="block text-sm font-medium text-slate-300 mb-2">Customer Name *</label>
-                  <input
-                    type="text"
-                    value={b2bFields.customer_name}
-                    onChange={(e) => setB2bFields({ ...b2bFields, customer_name: e.target.value })}
-                    className="w-full px-4 py-2 bg-slate-700 border border-slate-600 rounded-lg text-white focus:outline-none focus:border-blue-500"
-                    required
-                  />
-                </div>
-                
-                <div>
-                  <label className="block text-sm font-medium text-slate-300 mb-2">Company Name *</label>
-                  <input
-                    type="text"
-                    value={b2bFields.company_name}
-                    onChange={(e) => setB2bFields({ ...b2bFields, company_name: e.target.value })}
-                    className="w-full px-4 py-2 bg-slate-700 border border-slate-600 rounded-lg text-white focus:outline-none focus:border-blue-500"
-                    required
-                  />
-                </div>
-                
-                <div>
-                  <label className="block text-sm font-medium text-slate-300 mb-2">GST Number</label>
-                  <input
-                    type="text"
-                    value={b2bFields.gst_number}
-                    onChange={(e) => setB2bFields({ ...b2bFields, gst_number: e.target.value })}
-                    className="w-full px-4 py-2 bg-slate-700 border border-slate-600 rounded-lg text-white focus:outline-none focus:border-blue-500"
-                  />
-                </div>
-                
-                <div>
-                  <label className="block text-sm font-medium text-slate-300 mb-2">Contact Person *</label>
-                  <input
-                    type="text"
-                    value={b2bFields.contact_person}
-                    onChange={(e) => setB2bFields({ ...b2bFields, contact_person: e.target.value })}
-                    className="w-full px-4 py-2 bg-slate-700 border border-slate-600 rounded-lg text-white focus:outline-none focus:border-blue-500"
-                    required
-                  />
-                </div>
-                
-                <div>
-                  <label className="block text-sm font-medium text-slate-300 mb-2">Email</label>
-                  <input
-                    type="email"
-                    value={b2bFields.customer_email}
-                    onChange={(e) => setB2bFields({ ...b2bFields, customer_email: e.target.value })}
-                    className="w-full px-4 py-2 bg-slate-700 border border-slate-600 rounded-lg text-white focus:outline-none focus:border-blue-500"
-                  />
-                </div>
-                
-                <div>
-                  <label className="block text-sm font-medium text-slate-300 mb-2">Phone</label>
-                  <input
-                    type="tel"
-                    value={b2bFields.customer_phone}
-                    onChange={(e) => setB2bFields({ ...b2bFields, customer_phone: e.target.value })}
-                    className="w-full px-4 py-2 bg-slate-700 border border-slate-600 rounded-lg text-white focus:outline-none focus:border-blue-500"
-                  />
-                </div>
-              </div>
-              
-              <AddressFields
-                address={b2bFields.billing_address}
-                onChange={(address: Address) => setB2bFields({ ...b2bFields, billing_address: address })}
-                label="Billing Address"
-                required
-              />
-              
-              <div>
-                <label className="flex items-center gap-2 text-sm text-slate-300">
-                  <input
-                    type="checkbox"
-                    checked={b2bFields.delivery_matches_billing}
-                    onChange={(e) => {
-                      setB2bFields({ 
-                        ...b2bFields, 
-                        delivery_matches_billing: e.target.checked,
-                        delivery_address: e.target.checked ? { ...b2bFields.billing_address } : { ...emptyAddress }
-                      })
-                    }}
-                    className="rounded"
-                  />
-                  Delivery address same as billing address
-                </label>
-              </div>
-              
-              {!b2bFields.delivery_matches_billing && (
-                <AddressFields
-                  address={b2bFields.delivery_address}
-                  onChange={(address: Address) => setB2bFields({ ...b2bFields, delivery_address: address })}
-                  label="Delivery Address"
-                  required
-                />
-              )}
-            </div>
-          )}
-
-          {/* B2C Fields */}
-          {requestType === "b2c" && (
-            <div className="space-y-4 p-4 bg-slate-700/30 rounded-lg">
-              <h3 className="font-semibold text-white mb-3">B2C Customer Details</h3>
-              
-              <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-                <div>
-                  <label className="block text-sm font-medium text-slate-300 mb-2">Customer Name *</label>
-                  <input
-                    type="text"
-                    value={b2cFields.customer_name}
-                    onChange={(e) => setB2cFields({ ...b2cFields, customer_name: e.target.value })}
-                    className="w-full px-4 py-2 bg-slate-700 border border-slate-600 rounded-lg text-white focus:outline-none focus:border-blue-500"
-                    required
-                  />
-                </div>
-                
-                <div>
-                  <label className="block text-sm font-medium text-slate-300 mb-2">Phone *</label>
-                  <input
-                    type="tel"
-                    value={b2cFields.customer_phone}
-                    onChange={(e) => setB2cFields({ ...b2cFields, customer_phone: e.target.value })}
-                    className="w-full px-4 py-2 bg-slate-700 border border-slate-600 rounded-lg text-white focus:outline-none focus:border-blue-500"
-                    required
-                  />
-                </div>
-                
-                <div className="sm:col-span-2">
-                  <label className="block text-sm font-medium text-slate-300 mb-2">Email</label>
-                  <input
-                    type="email"
-                    value={b2cFields.customer_email}
-                    onChange={(e) => setB2cFields({ ...b2cFields, customer_email: e.target.value })}
-                    className="w-full px-4 py-2 bg-slate-700 border border-slate-600 rounded-lg text-white focus:outline-none focus:border-blue-500"
-                  />
-                </div>
-              </div>
-              
-              <AddressFields
-                address={b2cFields.billing_address}
-                onChange={(address: Address) => setB2cFields({ ...b2cFields, billing_address: address })}
-                label="Billing Address"
-                required
-              />
-              
-              <div>
-                <label className="flex items-center gap-2 text-sm text-slate-300">
-                  <input
-                    type="checkbox"
-                    checked={b2cFields.delivery_matches_billing}
-                    onChange={(e) => {
-                      setB2cFields({ 
-                        ...b2cFields, 
-                        delivery_matches_billing: e.target.checked,
-                        delivery_address: e.target.checked ? { ...b2cFields.billing_address } : { ...emptyAddress }
-                      })
-                    }}
-                    className="rounded"
-                  />
-                  Delivery address same as billing address
-                </label>
-              </div>
-              
-              {!b2cFields.delivery_matches_billing && (
-                <AddressFields
-                  address={b2cFields.delivery_address}
-                  onChange={(address: Address) => setB2cFields({ ...b2cFields, delivery_address: address })}
-                  label="Delivery Address"
-                  required
-                />
-              )}
-            </div>
-          )}
-
-          {/* Products */}
+          {/* Products Section */}
           <div>
             <div className="flex items-center justify-between mb-3">
               <label className="block text-sm font-medium text-slate-300">Products *</label>
               <Button
                 type="button"
                 onClick={addItem}
-                variant="outline"
                 size="sm"
-                className="border-slate-600 text-slate-300 bg-transparent"
+                className="bg-blue-600 hover:bg-blue-700 text-white text-xs"
               >
+                <Plus className="w-3 h-3 sm:w-4 sm:h-4 mr-1" />
                 Add Product
               </Button>
             </div>
-            
+
             <div className="space-y-3">
               {items.map((item, index) => (
-                <div key={index} className="flex flex-col gap-3 p-3 bg-slate-700/30 rounded-lg">
-                  <select
-                    value={item.product_id}
-                    onChange={(e) => updateItem(index, "product_id", e.target.value)}
-                    className="w-full px-4 py-2 bg-slate-700 border border-slate-600 rounded-lg text-white focus:outline-none focus:border-blue-500 text-sm sm:text-base"
-                    required
-                  >
-                    <option value="">Select Product</option>
-                    {products.map((product) => (
-                      <option key={product.id} value={product.id}>
-                        {product.name} - {product.model}
-                      </option>
-                    ))}
-                  </select>
-                  <div className="flex gap-2">
+                <div key={index} className="flex gap-2 items-start">
+                  <div className="flex-1">
+                    <select
+                      value={item.product_id}
+                      onChange={(e) => updateItem(index, "product_id", e.target.value)}
+                      className="w-full px-3 py-2 bg-slate-700 border border-slate-600 rounded-lg text-white text-sm focus:outline-none focus:border-blue-500"
+                      required
+                    >
+                      <option value="">Select Product</option>
+                      {products.map((product) => (
+                        <option key={product.id} value={product.id}>
+                          {product.name} {product.model && `- ${product.model}`}
+                        </option>
+                      ))}
+                    </select>
+                  </div>
+                  
+                  <div className="w-24">
                     <input
                       type="number"
+                      min="1"
                       value={item.quantity || ""}
                       onChange={(e) => updateItem(index, "quantity", parseInt(e.target.value) || 0)}
-                      placeholder="Quantity"
-                      min="1"
-                      className="flex-1 px-3 sm:px-4 py-2 bg-slate-700 border border-slate-600 rounded-lg text-white focus:outline-none focus:border-blue-500 text-sm sm:text-base"
+                      placeholder="Qty"
+                      className="w-full px-3 py-2 bg-slate-700 border border-slate-600 rounded-lg text-white text-sm focus:outline-none focus:border-blue-500"
                       required
                     />
+                  </div>
+
+                  {items.length > 1 && (
                     <Button
                       type="button"
                       onClick={() => removeItem(index)}
-                      variant="outline"
+                      variant="ghost"
                       size="sm"
-                      className="border-red-600 text-red-400 hover:bg-red-950 flex-shrink-0"
+                      className="text-red-400 hover:text-red-300 hover:bg-red-950 px-2"
                     >
-                      <X className="w-4 h-4" />
+                      <Trash2 className="w-4 h-4" />
                     </Button>
-                  </div>
+                  )}
                 </div>
               ))}
-              
-              {items.length === 0 && (
-                <p className="text-sm text-slate-400 text-center py-4">Click "Add Product" to add items</p>
-              )}
             </div>
           </div>
 
@@ -509,17 +216,26 @@ export default function AgentStockRequestModal({ onClose, onSuccess }: AgentStoc
             <textarea
               value={notes}
               onChange={(e) => setNotes(e.target.value)}
-              className="w-full px-4 py-2 bg-slate-700 border border-slate-600 rounded-lg text-white focus:outline-none focus:border-blue-500 resize-none h-20"
-              placeholder="Additional notes or special instructions..."
+              rows={3}
+              placeholder="Add any additional notes or instructions..."
+              className="w-full px-3 py-2 bg-slate-700 border border-slate-600 rounded-lg text-white placeholder-slate-500 text-sm focus:outline-none focus:border-blue-500"
             />
           </div>
 
-          <div className="flex flex-col sm:flex-row gap-3 pt-4">
+          {/* Info Box */}
+          <div className="p-4 bg-blue-900/20 border border-blue-700/50 rounded-lg">
+            <p className="text-sm text-blue-300">
+              💡 <strong>Note:</strong> Request stock from your admin. Once approved and transferred, you can use it for both B2B and B2C sales.
+            </p>
+          </div>
+
+          {/* Submit Button */}
+          <div className="flex gap-3 pt-4">
             <Button
               type="button"
               onClick={onClose}
               variant="outline"
-              className="flex-1 border-slate-600 text-slate-300 bg-transparent"
+              className="flex-1 border-slate-600 text-slate-300 hover:bg-slate-700"
               disabled={isSubmitting}
             >
               Cancel
@@ -532,10 +248,10 @@ export default function AgentStockRequestModal({ onClose, onSuccess }: AgentStoc
               {isSubmitting ? (
                 <>
                   <Loader2 className="w-4 h-4 mr-2 animate-spin" />
-                  Creating...
+                  Submitting...
                 </>
               ) : (
-                "Create Request"
+                "Submit Request"
               )}
             </Button>
           </div>

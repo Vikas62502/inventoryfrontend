@@ -501,7 +501,7 @@ export default function AdminDashboard({ userName }: AdminDashboardProps) {
                 >
                   <div className="flex-1 min-w-0 w-full sm:w-auto">
                     <p className="text-sm text-white font-medium">{agent.name}</p>
-                    <p className="text-xs text-slate-400">@{agent.username}</p>
+                    <p className="text-xs text-slate-400">{agent.username}</p>
                   </div>
                   <span className={`text-xs px-2 py-0.5 rounded-full whitespace-nowrap ${
                     agent.is_active ? "bg-green-500/20 text-green-400" : "bg-amber-500/20 text-amber-400"
@@ -1410,7 +1410,7 @@ export default function AdminDashboard({ userName }: AdminDashboardProps) {
                                 <div className="flex items-start justify-between gap-2">
                                   <div className="flex-1 min-w-0">
                                     <p className="text-white font-semibold text-sm">{agent.name}</p>
-                                    <p className="text-xs text-slate-400 mt-1">@{agent.username}</p>
+                                    <p className="text-xs text-slate-400 mt-1">{agent.username}</p>
                                   </div>
                                   <span
                                     className={`px-2 py-1 text-xs font-semibold rounded-full ${
@@ -1473,7 +1473,7 @@ export default function AdminDashboard({ userName }: AdminDashboardProps) {
                                     <td className="px-6 py-4 text-white font-medium">
                                       {agent.name}
                                     </td>
-                                    <td className="px-6 py-4 text-slate-300">@{agent.username}</td>
+                                    <td className="px-6 py-4 text-slate-300">{agent.username}</td>
                                     <td className="px-6 py-4 text-slate-400 capitalize">
                                       {agent.role}
                                     </td>

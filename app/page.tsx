@@ -5,11 +5,13 @@ import { Button } from "@/components/ui/button"
 import { Loader2 } from "lucide-react"
 import LoginPage from "@/components/auth/login-page"
 import SuperAdminDashboard from "@/components/dashboards/super-admin-dashboard"
+import SuperAdminManagerDashboard from "@/components/dashboards/super-admin-manager-dashboard"
 import AdminDashboard from "@/components/dashboards/admin-dashboard"
 import AgentDashboard from "@/components/dashboards/agent-dashboard"
 import AccountDashboard from "@/components/dashboards/account-dashboard"
 import { authService } from "@/lib/auth"
 import { authApi } from "@/lib/api"
+import { FEATURE_FLAGS } from "@/lib/feature-flags"
 import type { User } from "@/lib/auth"
 
 export default function Home() {
@@ -110,6 +112,7 @@ export default function Home() {
       {/* Dashboard Content */}
       <main className="w-full overflow-x-hidden">
         {loggedInUser.role === "super-admin" && <SuperAdminDashboard userName={loggedInUser.name} />}
+        {FEATURE_FLAGS.ENABLE_PRODUCT_MANAGER_ROLE && loggedInUser.role === "super-admin-manager" && <SuperAdminManagerDashboard userName={loggedInUser.name} />}
         {loggedInUser.role === "admin" && <AdminDashboard userName={loggedInUser.name} />}
         {loggedInUser.role === "account" && <AccountDashboard userName={loggedInUser.name} />}
         {loggedInUser.role === "agent" && <AgentDashboard userName={loggedInUser.name} />}

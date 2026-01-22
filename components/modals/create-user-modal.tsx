@@ -10,12 +10,14 @@ interface CreateUserModalProps {
   onClose: () => void
   onSuccess: () => void
   creatorRole: "super-admin" | "admin" // Who is creating the user
+  targetRole?: "admin" | "agent" | "super-admin-manager" // Optional: specify which role to create
 }
 
 export default function CreateUserModal({
   onClose,
   onSuccess,
   creatorRole,
+  targetRole: propTargetRole,
 }: CreateUserModalProps) {
   const [formData, setFormData] = useState({
     username: "",
@@ -28,8 +30,8 @@ export default function CreateUserModal({
   const [showPassword, setShowPassword] = useState(false)
   const [showConfirmPassword, setShowConfirmPassword] = useState(false)
 
-  // Super-admin can create admins, admins can create agents
-  const targetRole = creatorRole === "super-admin" ? "admin" : "agent"
+  // Determine target role: use prop if provided, otherwise default behavior
+  const targetRole = propTargetRole || (creatorRole === "super-admin" ? "admin" : "agent")
 
   const handleChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     setFormData({ ...formData, [e.target.name]: e.target.value })
@@ -81,7 +83,7 @@ export default function CreateUserModal({
       <Card className="bg-slate-800 border-slate-700 p-4 sm:p-6 lg:p-8 max-w-[95%] sm:max-w-lg w-full my-4 sm:my-8 max-h-[95vh] overflow-y-auto">
         <div className="flex items-center justify-between mb-4 sm:mb-6 sticky top-0 bg-slate-800 pb-4 z-10">
           <h2 className="text-xl sm:text-2xl font-bold text-white">
-            Create {targetRole === "admin" ? "Admin" : "Agent"}
+            Create {targetRole === "admin" ? "Admin" : targetRole === "super-admin-manager" ? "Product Manager" : "Agent"}
           </h2>
           <button onClick={onClose} className="text-slate-400 hover:text-white transition flex-shrink-0 ml-2">
             <X className="w-5 h-5 sm:w-6 sm:h-6" />
@@ -196,7 +198,7 @@ export default function CreateUserModal({
                   Creating...
                 </>
               ) : (
-                `Create ${targetRole === "admin" ? "Admin" : "Agent"}`
+                `Create ${targetRole === "admin" ? "Admin" : targetRole === "super-admin-manager" ? "Product Manager" : "Agent"}`
               )}
             </Button>
           </div>

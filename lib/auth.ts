@@ -2,7 +2,7 @@ export interface User {
   id: string
   username: string
   name: string
-  role: "super-admin" | "admin" | "agent" | "account"
+  role: "super-admin" | "super-admin-manager" | "admin" | "agent" | "account"  // Note: "super-admin-manager" requires backend support
   is_active?: boolean
   created_at?: string
   updated_at?: string
