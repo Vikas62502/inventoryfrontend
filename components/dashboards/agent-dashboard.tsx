@@ -12,14 +12,14 @@ import { Tabs, TabsList, TabsTrigger, TabsContent } from "@/components/ui/tabs"
 import { useSalesState } from "@/hooks/use-sales-state"
 import { useStockRequestsState } from "@/hooks/use-stock-requests-state"
 import { authService } from "@/lib/auth"
-import { salesApi, productsApi } from "@/lib/api"
+import { salesApi, productsApi, quotationsApi, type Quotation } from "@/lib/api"
 import { generateQuotationPDF } from "@/lib/quotation-generator"
 import { formatDateISO } from "@/lib/utils"
 import type { Sale as ApiSale, Product } from "@/lib/api"
 import type { StockRequest } from "@/lib/api"
 
 // Type alias for Sale from API (which has snake_case properties)
-type Sale = ApiSale
+type Sale = ApiSale & { quotation_id?: string; quotation_status?: string; quotation_final_amount?: number }
 
 interface AgentDashboardProps {
   userName: string
@@ -40,8 +40,82 @@ export default function AgentDashboard({ userName }: AgentDashboardProps) {
   const [downloadingSaleId, setDownloadingSaleId] = useState<string | null>(null)
   const [activeTab, setActiveTab] = useState<string>("sales")
   const [stockSearchQuery, setStockSearchQuery] = useState("")
+  const [quotations, setQuotations] = useState<Quotation[]>([])
+  const [loadingQuotations, setLoadingQuotations] = useState(true)
 
   const currentUserId = authService.getUser()?.id
+
+  // Fetch quotations (B2C sales) from quotations API
+  useEffect(() => {
+    const loadQuotations = async () => {
+      try {
+        setLoadingQuotations(true)
+        const data = await quotationsApi.getAll()
+        setQuotations(data)
+      } catch (err) {
+        console.error("Failed to load quotations:", err)
+        setQuotations([])
+      } finally {
+        setLoadingQuotations(false)
+      }
+    }
+    loadQuotations()
+  }, [])
+
+  // Convert quotation to Sale format for display
+  const convertQuotationToSale = (quotation: Quotation): Sale => {
+    const customerName = `${quotation.customer.firstName} ${quotation.customer.lastName}`.trim()
+    const totalAmount = quotation.pricing?.finalAmount || quotation.pricing?.totalAmount || quotation.finalAmount || 0
+    const subtotalAmount = quotation.pricing?.subtotal || totalAmount
+    const discountAmount = quotation.pricing?.discountAmount || 0
+    const taxAmount = quotation.pricing?.totalSubsidy || 0
+    const quantity = quotation.products?.panelQuantity || 0
+    const unitPrice = quantity > 0 ? totalAmount / quantity : totalAmount
+    const itemSubtotal = unitPrice * quantity
+
+    // Map quotation customer address to billing address format
+    const billingAddress = quotation.customer.address ? {
+      line1: quotation.customer.address.street || "",
+      line2: "",
+      city: quotation.customer.address.city || "",
+      state: quotation.customer.address.state || "",
+      postal_code: quotation.customer.address.pincode || "",
+      country: "India",
+    } : undefined
+
+    return {
+      id: quotation.id,
+      type: "B2C",
+      customer_name: customerName,
+      items: [
+        {
+          product_id: "",
+          quantity,
+          unit_price: unitPrice,
+          gst_rate: 0,
+          subtotal: itemSubtotal,
+        },
+      ],
+      subtotal: subtotalAmount,
+      tax_amount: taxAmount,
+      discount_amount: discountAmount,
+      total_amount: totalAmount,
+      payment_status: (quotation.paymentStatus as "pending" | "completed") || (quotation.status === "pending" ? "pending" : "completed"),
+      customer_phone: quotation.customer.mobile,
+      customer_email: quotation.customer.email || undefined,
+      billing_address: billingAddress,
+      delivery_address: billingAddress, // Use same address for delivery
+      delivery_matches_billing: true,
+      created_by_id: quotation.dealerId || quotation.dealer?.id || "quotation",
+      created_at: quotation.createdAt,
+      updated_at: quotation.createdAt,
+      saleDate: quotation.createdAt,
+      // Add quotation-specific fields
+      quotation_id: quotation.id,
+      quotation_status: quotation.status,
+      quotation_final_amount: quotation.pricing?.finalAmount || 0,
+    }
+  }
 
   // NOTE: Backend automatically filters data based on authenticated user's role
   // Agents will only receive their own sales and stock requests from the API
@@ -50,28 +124,56 @@ export default function AgentDashboard({ userName }: AgentDashboardProps) {
   const handleDownloadQuotation = async (sale: Sale) => {
     try {
       setDownloadingSaleId(sale.id)
-      // Fetch full sale details with addresses
-      const fullSale = await salesApi.getById(sale.id)
-      console.log("Fetched sale data:", fullSale)
       
-      // Fetch all products for lookup
-      const allProducts = await productsApi.getAll()
-      const productsMap: Record<string, Product> = {}
-      allProducts.forEach(p => {
-        productsMap[p.id] = p
-      })
+      // Check if this is a quotation (B2C from quotations API)
+      const isQuotation = (sale as any).quotation_id || (sale.type === "B2C" && quotations.find(q => q.id === sale.id))
       
-      // Validate required data
-      if (!fullSale.items || fullSale.items.length === 0) {
-        throw new Error("Sale has no items")
-      }
-      
-      // Generate and download PDF
-      try {
-        generateQuotationPDF(fullSale as any, productsMap)
-      } catch (pdfError: any) {
-        console.error("PDF generation error:", pdfError)
-        throw new Error(`PDF generation failed: ${pdfError.message}`)
+      if (isQuotation) {
+        // Fetch full quotation details
+        const quotation = await quotationsApi.getById(sale.id)
+        console.log("Fetched quotation data:", quotation)
+        
+        // Convert quotation to sale format for PDF generation
+        const quotationAsSale = convertQuotationToSale(quotation)
+        
+        // Fetch all products for lookup
+        const allProducts = await productsApi.getAll()
+        const productsMap: Record<string, Product> = {}
+        allProducts.forEach(p => {
+          productsMap[p.id] = p
+        })
+        
+        // Generate and download PDF
+        try {
+          generateQuotationPDF(quotationAsSale as any, productsMap)
+        } catch (pdfError: any) {
+          console.error("PDF generation error:", pdfError)
+          throw new Error(`PDF generation failed: ${pdfError.message}`)
+        }
+      } else {
+        // Regular sale from sales API
+        const fullSale = await salesApi.getById(sale.id)
+        console.log("Fetched sale data:", fullSale)
+        
+        // Fetch all products for lookup
+        const allProducts = await productsApi.getAll()
+        const productsMap: Record<string, Product> = {}
+        allProducts.forEach(p => {
+          productsMap[p.id] = p
+        })
+        
+        // Validate required data
+        if (!fullSale.items || fullSale.items.length === 0) {
+          throw new Error("Sale has no items")
+        }
+        
+        // Generate and download PDF
+        try {
+          generateQuotationPDF(fullSale as any, productsMap)
+        } catch (pdfError: any) {
+          console.error("PDF generation error:", pdfError)
+          throw new Error(`PDF generation failed: ${pdfError.message}`)
+        }
       }
     } catch (err: any) {
       console.error("Failed to generate quotation:", err)
@@ -102,9 +204,13 @@ export default function AgentDashboard({ userName }: AgentDashboardProps) {
   const pendingRequests = filteredAndSortedRequests.filter(r => r.status === "pending")
   const dispatchedRequests = filteredAndSortedRequests.filter(r => r.status === "dispatched")
 
+  // Convert quotations to sales format and merge with existing sales
+  const quotationSales = quotations.map(convertQuotationToSale)
+  const allSales = [...sales.sales, ...quotationSales]
+
   // Backend filters sales - agents receive only their own sales
   // Sort sales by date (most recent first)
-  const sortedSales = [...sales.sales].sort((a, b) => {
+  const sortedSales = [...allSales].sort((a, b) => {
     const dateA = (a as any).sale_date ? new Date((a as any).sale_date).getTime() :
                   a.saleDate ? new Date(a.saleDate).getTime() :
                   a.created_at ? new Date(a.created_at).getTime() : 0
@@ -146,25 +252,50 @@ export default function AgentDashboard({ userName }: AgentDashboardProps) {
     setSelectedRequest(null)
   }
 
-  // Calculate metrics based on sales (backend already filtered - agents only see their own)
-  const b2bSales = sales.sales.filter((s) => s.type === "B2B")
-  const b2cSales = sales.sales.filter((s) => s.type === "B2C")
-  const totalRevenue = sales.sales.reduce((sum, s) => sum + (s.total_amount || (s as any).totalAmount || 0), 0)
-  const b2bRevenue = b2bSales.reduce((sum, s) => sum + (s.total_amount || (s as any).totalAmount || 0), 0)
-  const b2cRevenue = b2cSales.reduce((sum, s) => sum + (s.total_amount || (s as any).totalAmount || 0), 0)
-  const pendingPayments = sales.sales.filter((s) => (s.payment_status || (s as any).paymentStatus) === "pending").length
-  const completedPayments = sales.sales.filter((s) => (s.payment_status || (s as any).paymentStatus) === "completed").length
-  const pendingAmount = sales.sales
+  // Calculate metrics based on sales (includes quotations for B2C)
+  const b2bSales = allSales.filter((s) => s.type === "B2B")
+  const b2cSales = allSales.filter((s) => s.type === "B2C")
+  
+  // Helper function to safely get total amount
+  const getTotalAmount = (s: Sale): number => {
+    const amount = s.total_amount || (s as any).totalAmount || 0
+    return isNaN(amount) || !isFinite(amount) ? 0 : amount
+  }
+  
+  const totalRevenue = allSales.reduce((sum, s) => {
+    const amount = getTotalAmount(s)
+    return sum + amount
+  }, 0)
+  const b2bRevenue = b2bSales.reduce((sum, s) => {
+    const amount = getTotalAmount(s)
+    return sum + amount
+  }, 0)
+  const b2cRevenue = b2cSales.reduce((sum, s) => {
+    const amount = getTotalAmount(s)
+    return sum + amount
+  }, 0)
+  const pendingPayments = allSales.filter((s) => (s.payment_status || (s as any).paymentStatus) === "pending").length
+  const completedPayments = allSales.filter((s) => (s.payment_status || (s as any).paymentStatus) === "completed").length
+  const pendingAmount = allSales
     .filter((s) => (s.payment_status || (s as any).paymentStatus) === "pending")
-    .reduce((sum, s) => sum + (s.total_amount || (s as any).totalAmount || 0), 0)
-  const averageSaleValue = sales.sales.length > 0 ? Math.round(totalRevenue / sales.sales.length) : 0
+    .reduce((sum, s) => {
+      const amount = getTotalAmount(s)
+      return sum + amount
+    }, 0)
+  // Calculate average sale value with proper NaN handling
+  const safeTotalRevenue = isNaN(totalRevenue) || !isFinite(totalRevenue) ? 0 : totalRevenue
+  const averageSaleValue = allSales.length > 0 && safeTotalRevenue > 0 
+    ? Math.round(safeTotalRevenue / allSales.length) 
+    : 0
+  
+  // Calculate top product from all sales (including quotations)
   const topProduct =
-    sales.sales.length > 0
+    allSales.length > 0
       ? Object.entries(
-          sales.sales.reduce(
+          allSales.reduce(
             (acc, s) => {
-              const productName = (s as any).productName || s.items?.[0]?.product?.name || "Unknown"
-              const quantity = (s as any).quantity || (s.items?.reduce((sum: number, item: any) => sum + item.quantity, 0) || 0)
+              const productName = (s as any).productName || s.items?.[0]?.product?.name || "Multiple Products"
+              const quantity = (s as any).quantity || (s.items?.reduce((sum: number, item: any) => sum + (item.quantity || 0), 0) || 0)
               acc[productName] = (acc[productName] || 0) + quantity
               return acc
             },
@@ -175,7 +306,11 @@ export default function AgentDashboard({ userName }: AgentDashboardProps) {
 
   // Calculate agent's current stock
   // Stock received from confirmed requests minus stock sold
-  const confirmedRequests = requests.requests.filter(r => r.status === "confirmed")
+  const confirmedRequests = requests.requests.filter(r => {
+    if (r.status !== "confirmed") return false
+    if (!currentUserId) return false
+    return r.requested_by_id === currentUserId
+  })
   const stockReceived: Record<string, number> = {}
   confirmedRequests.forEach(request => {
     request.items?.forEach(item => {
@@ -225,6 +360,11 @@ export default function AgentDashboard({ userName }: AgentDashboardProps) {
     }))
     .sort((a, b) => (b.quantity) - (a.quantity))
 
+  const availableStockForSales = stockItems.reduce<Record<string, number>>((acc, item) => {
+    acc[item.productId] = item.quantity
+    return acc
+  }, {})
+
   if (sales.loading || requests.loading) {
     return (
       <div className="flex items-center justify-center min-h-[400px]">
@@ -245,16 +385,7 @@ export default function AgentDashboard({ userName }: AgentDashboardProps) {
       </div>
 
       {/* Key Metrics */}
-      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3 sm:gap-4">
-        <Card className="bg-slate-800 border-slate-700 p-4 sm:p-6">
-          <div className="flex items-center justify-between">
-            <div>
-              <p className="text-slate-400 text-xs sm:text-sm mb-1 sm:mb-2">Total Revenue</p>
-              <p className="text-xl sm:text-2xl font-bold text-emerald-400">₹{(totalRevenue / 1000).toFixed(1)}K</p>
-            </div>
-            <TrendingUp className="w-6 h-6 sm:w-8 sm:h-8 text-emerald-400 opacity-50 flex-shrink-0" />
-          </div>
-        </Card>
+      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3 sm:gap-4">
         <Card className="bg-slate-800 border-slate-700 p-4 sm:p-6">
           <div className="flex items-center justify-between">
             <div>
@@ -277,7 +408,9 @@ export default function AgentDashboard({ userName }: AgentDashboardProps) {
           <div className="flex items-center justify-between">
             <div>
               <p className="text-slate-400 text-xs sm:text-sm mb-1 sm:mb-2">Pending Payments</p>
-              <p className="text-xl sm:text-2xl font-bold text-amber-400">₹{(pendingAmount / 1000).toFixed(1)}K</p>
+              <p className="text-xl sm:text-2xl font-bold text-amber-400">
+                {pendingAmount > 0 ? `₹${(pendingAmount / 1000).toFixed(1)}K` : '₹0'}
+              </p>
             </div>
             <CreditCard className="w-6 h-6 sm:w-8 sm:h-8 text-amber-400 opacity-50 flex-shrink-0" />
           </div>
@@ -558,7 +691,9 @@ export default function AgentDashboard({ userName }: AgentDashboardProps) {
                   <BarChart3 className="w-4 h-4 sm:w-5 sm:h-5 text-blue-400" />
                   <span className="text-xs text-slate-400">B2B Revenue</span>
                 </div>
-                <p className="text-xl sm:text-2xl font-bold text-white">₹{(b2bRevenue / 1000).toFixed(1)}K</p>
+                <p className="text-xl sm:text-2xl font-bold text-white">
+                  {b2bRevenue > 0 ? `₹${(b2bRevenue / 1000).toFixed(1)}K` : '₹0'}
+                </p>
                 <p className="text-xs text-slate-400 mt-1">{b2bSales.length} transactions</p>
               </Card>
               <Card className="bg-slate-800 border-slate-700 p-3 sm:p-4">
@@ -566,7 +701,9 @@ export default function AgentDashboard({ userName }: AgentDashboardProps) {
                   <Target className="w-4 h-4 sm:w-5 sm:h-5 text-cyan-400" />
                   <span className="text-xs text-slate-400">B2C Revenue</span>
                 </div>
-                <p className="text-xl sm:text-2xl font-bold text-white">₹{(b2cRevenue / 1000).toFixed(1)}K</p>
+                <p className="text-xl sm:text-2xl font-bold text-white">
+                  {b2cRevenue > 0 ? `₹${(b2cRevenue / 1000).toFixed(1)}K` : '₹0'}
+                </p>
                 <p className="text-xs text-slate-400 mt-1">{b2cSales.length} transactions</p>
               </Card>
               <Card className="bg-slate-800 border-slate-700 p-3 sm:p-4">
@@ -574,7 +711,9 @@ export default function AgentDashboard({ userName }: AgentDashboardProps) {
                   <TrendingUp className="w-4 h-4 sm:w-5 sm:h-5 text-emerald-400" />
                   <span className="text-xs text-slate-400">Avg. Sale Value</span>
                 </div>
-                <p className="text-xl sm:text-2xl font-bold text-white">₹{averageSaleValue.toLocaleString()}</p>
+                <p className="text-xl sm:text-2xl font-bold text-white">
+                  {averageSaleValue > 0 ? `₹${averageSaleValue.toLocaleString()}` : '₹0'}
+                </p>
                 <p className="text-xs text-slate-400 mt-1 truncate">
                   {topProduct ? `Top: ${topProduct[0]}` : "No sales yet"}
                 </p>
@@ -820,6 +959,7 @@ export default function AgentDashboard({ userName }: AgentDashboardProps) {
             setSaleType(null)
           }}
           onSave={handleCreateSale}
+          availableStock={availableStockForSales}
         />
       )}
 

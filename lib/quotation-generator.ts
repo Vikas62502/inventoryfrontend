@@ -223,10 +223,15 @@ export function generateQuotationPDF(sale: SaleWithAddresses, products: Record<s
     yPos += 10
 
     // Buyer (Bill To) Information
-    const billingAddress = (sale as any).billing_address as Address | undefined
+    // Try multiple ways to get billing address
+    const billingAddress = (sale as any).billing_address || (sale as any).billingAddress as Address | undefined
     const buyerState = billingAddress?.state || ''
     const buyerGSTIN = sale.gst_number || ''
     const buyerStateCode = getGSTStateCode(buyerState)
+    
+    // Debug: Log address data
+    console.log("Quotation PDF - Billing Address:", billingAddress)
+    console.log("Quotation PDF - Sale data:", sale)
 
     doc.setFontSize(10)
     doc.setFont('helvetica', 'bold')
@@ -272,6 +277,26 @@ export function generateQuotationPDF(sale: SaleWithAddresses, products: Record<s
           yPos += buyerAddressLines.length * 5
         }
       }
+    }
+
+    // Display phone number
+    if (sale.customer_phone) {
+      doc.text(`Phone: ${sale.customer_phone}`, margin, yPos)
+      yPos += 5
+    }
+
+    // Display email if available
+    if (sale.customer_email) {
+      doc.text(`E-Mail: ${sale.customer_email}`, margin, yPos)
+      yPos += 5
+    }
+
+    // For B2B, display contact person and their phone if available
+    if (sale.type === "B2B" && sale.contact_person) {
+      doc.text(`Contact Person: ${sale.contact_person}`, margin, yPos)
+      yPos += 5
+      // Note: If contact person has a separate phone, it would need to be added to the Sale interface
+      // For now, we show the customer_phone as the contact person's phone
     }
 
     if (buyerGSTIN) {
@@ -391,10 +416,14 @@ export function generateQuotationPDF(sale: SaleWithAddresses, products: Record<s
     doc.setFontSize(10)
     doc.setFont('helvetica', 'normal')
     // Calculate GST percentage for display
-    const gstPercent = taxAmount > 0 && safeSubtotal > 0 
-      ? Math.round((taxAmount / safeSubtotal) * 100) 
-      : Math.round(gstRate)
-    const cgstPercentDisplay = Math.round(gstPercent / 2)
+    // Use the actual GST rate from items, or calculate from tax amount
+    let gstPercent = gstRate
+    if (taxAmount > 0 && safeSubtotal > 0) {
+      // Calculate actual GST percentage from tax amount
+      gstPercent = (taxAmount / safeSubtotal) * 100
+    }
+    // Split GST into CGST and SGST, showing one decimal place
+    const cgstPercentDisplay = (gstPercent / 2).toFixed(1)
     
     // Two-column layout: Labels at left, values at extreme right (3rd part of page)
     // Calculate label position (around 65% of page width for labels - 3rd part of page)

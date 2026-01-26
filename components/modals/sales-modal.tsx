@@ -4,23 +4,26 @@ import { useState, useEffect } from "react"
 import { Card } from "@/components/ui/card"
 import { Button } from "@/components/ui/button"
 import { X, Loader2, AlertCircle } from "lucide-react"
-import { productsApi, salesApi } from "@/lib/api"
-import type { Product, SaleItem } from "@/lib/api"
+import { productsApi, salesApi, quotationsApi, type Product, SaleItem, type Quotation } from "@/lib/api"
 import AddressFields, { type Address } from "@/components/forms/address-fields"
 
 interface SalesModalProps {
   saleType: "b2b" | "b2c"
   onClose: () => void
   onSave: (sale: any) => void
+  availableStock?: Record<string, number>
 }
 
-export default function SalesModal({ saleType, onClose, onSave }: SalesModalProps) {
+export default function SalesModal({ saleType, onClose, onSave, availableStock }: SalesModalProps) {
   const [products, setProducts] = useState<Product[]>([])
+  const [quotations, setQuotations] = useState<Quotation[]>([])
   const [loading, setLoading] = useState(true)
+  const [loadingQuotations, setLoadingQuotations] = useState(false)
   const [isSubmitting, setIsSubmitting] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const [imageFile, setImageFile] = useState<File | null>(null)
   const [imagePreview, setImagePreview] = useState<string | null>(null)
+  const [selectedQuotationId, setSelectedQuotationId] = useState<string>("")
 
   const [items, setItems] = useState<Array<{ product_id: string; quantity: number; unit_price: number; gst_rate: number }>>([])
 
@@ -59,6 +62,10 @@ export default function SalesModal({ saleType, onClose, onSave }: SalesModalProp
 
   const [notes, setNotes] = useState("")
 
+  const filteredProducts = availableStock
+    ? products.filter((product) => (availableStock[product.id] || 0) > 0)
+    : products
+
   useEffect(() => {
     const loadProducts = async () => {
       try {
@@ -72,6 +79,91 @@ export default function SalesModal({ saleType, onClose, onSave }: SalesModalProp
     }
     loadProducts()
   }, [])
+
+  // Load quotations for B2C sales
+  useEffect(() => {
+    if (saleType === "b2c") {
+      const loadQuotations = async () => {
+        try {
+          setLoadingQuotations(true)
+          console.log("Loading quotations for B2C sale...")
+          const data = await quotationsApi.getAll()
+          console.log("Quotations loaded:", data)
+          console.log("Number of quotations:", data.length)
+          setQuotations(data)
+          
+          if (data.length === 0) {
+            console.warn("No quotations found. This might be expected if no quotations exist yet.")
+          }
+        } catch (err: any) {
+          console.error("Failed to load quotations:", err)
+          console.error("Error details:", {
+            message: err.message,
+            status: err.status,
+            data: err.data
+          })
+          // Don't show error - quotations are optional
+          setQuotations([])
+        } finally {
+          setLoadingQuotations(false)
+        }
+      }
+      loadQuotations()
+    }
+  }, [saleType])
+
+  // Handle quotation selection - auto-fill customer details
+  const handleQuotationSelect = async (quotationId: string) => {
+    if (!quotationId) {
+      // Clear fields if no quotation selected
+      setB2cFields({
+        customer_name: "",
+        customer_email: "",
+        customer_phone: "",
+        billing_address: { ...emptyAddress },
+        delivery_address: { ...emptyAddress },
+        delivery_matches_billing: false,
+      })
+      setSelectedQuotationId("")
+      return
+    }
+
+    try {
+      setLoadingQuotations(true)
+      const quotation = await quotationsApi.getById(quotationId)
+      
+      // Auto-fill customer details from quotation
+      const customerName = `${quotation.customer.firstName} ${quotation.customer.lastName}`.trim()
+      const customerPhone = quotation.customer.mobile
+      const customerEmail = quotation.customer.email || ""
+      
+      // Map quotation address to Address format
+      const billingAddress: Address = {
+        line1: quotation.customer.address?.street || "",
+        line2: "",
+        city: quotation.customer.address?.city || "",
+        state: quotation.customer.address?.state || "",
+        postal_code: quotation.customer.address?.pincode || "",
+        country: "India", // Default or from quotation if available
+      }
+
+      setB2cFields({
+        customer_name: customerName,
+        customer_email: customerEmail,
+        customer_phone: customerPhone,
+        billing_address: billingAddress,
+        delivery_address: { ...billingAddress },
+        delivery_matches_billing: true,
+      })
+      
+      setSelectedQuotationId(quotationId)
+    } catch (err: any) {
+      console.error("Failed to load quotation details:", err)
+      setError("Failed to load customer details from quotation")
+    } finally {
+      setLoadingQuotations(false)
+    }
+  }
 
   const addItem = () => {
     setItems([...items, { product_id: "", quantity: 0, unit_price: 0, gst_rate: 0 }])
@@ -133,9 +225,52 @@ export default function SalesModal({ saleType, onClose, onSave }: SalesModalProp
       return
     }
 
-    if (items.some(item => !item.product_id || item.quantity <= 0 || item.unit_price <= 0)) {
+    const normalizedItems = items.map(item => {
+      const quantity = Number(item.quantity)
+      const unit_price = Number(item.unit_price)
+      const gst_rate = Number(item.gst_rate ?? 0)
+      const subtotal = Number.isFinite(quantity) && Number.isFinite(unit_price)
+        ? quantity * unit_price
+        : 0
+      return {
+      product_id: (item.product_id || "").trim(),
+      quantity,
+      unit_price,
+      gst_rate,
+      subtotal,
+      }
+    })
+
+    if (
+      normalizedItems.some(
+        item =>
+          !item.product_id ||
+          !Number.isFinite(item.quantity) ||
+          item.quantity <= 0 ||
+          !Number.isInteger(item.quantity) ||
+          !Number.isFinite(item.unit_price) ||
+          item.unit_price <= 0 ||
+          !Number.isFinite(item.gst_rate) ||
+          item.gst_rate < 0,
+      )
+    ) {
       setError("Please fill all product details correctly")
       return
+    }
+
+    // Validate against available stock for agents (if provided)
+    if (availableStock) {
+      for (const item of normalizedItems) {
+        const availableQty = availableStock[item.product_id] || 0
+        if (item.quantity > availableQty) {
+          const product = products.find(p => p.id === item.product_id)
+          const productLabel = product
+            ? `${product.name}${product.model && product.model !== product.name ? ` - ${product.model}` : ""}`
+            : "Selected product"
+          setError(`${productLabel}: Requested quantity (${item.quantity}) exceeds available stock (${availableQty} units).`)
+          return
+        }
+      }
     }
 
     // Validate B2B fields
@@ -185,19 +320,15 @@ export default function SalesModal({ saleType, onClose, onSave }: SalesModalProp
     setIsSubmitting(true)
 
     try {
-      const { subtotal, taxAmount } = calculateTotals()
+      const { subtotal, taxAmount, totalAmount } = calculateTotals()
       
-      const saleData: any = {
+      const baseSaleData: any = {
         type: saleType === "b2b" ? "B2B" : "B2C",
         customer_name: saleType === "b2b" ? b2bFields.customer_name : b2cFields.customer_name,
-        items: items.map(item => ({
-          product_id: item.product_id,
-          quantity: item.quantity,
-          unit_price: item.unit_price,
-          gst_rate: item.gst_rate || 0,
-        })),
         tax_amount: taxAmount,
         discount_amount: 0,
+        subtotal,
+        total_amount: totalAmount,
         delivery_matches_billing: saleType === "b2b" ? b2bFields.delivery_matches_billing : b2cFields.delivery_matches_billing,
         notes: notes || undefined,
         image: imageFile || undefined,
@@ -205,34 +336,76 @@ export default function SalesModal({ saleType, onClose, onSave }: SalesModalProp
 
       // Add B2B specific fields
       if (saleType === "b2b") {
-        saleData.company_name = b2bFields.company_name
-        saleData.gst_number = b2bFields.gst_number || undefined
-        saleData.contact_person = b2bFields.contact_person
-        saleData.customer_email = b2bFields.customer_email || undefined
-        saleData.customer_phone = b2bFields.customer_phone || undefined
+        baseSaleData.company_name = b2bFields.company_name
+        baseSaleData.gst_number = b2bFields.gst_number || undefined
+        baseSaleData.contact_person = b2bFields.contact_person
+        baseSaleData.customer_email = b2bFields.customer_email || undefined
+        baseSaleData.customer_phone = b2bFields.customer_phone || undefined
         // Send address objects - backend will create them
-        saleData.billing_address = b2bFields.billing_address
+        baseSaleData.billing_address = b2bFields.billing_address
         if (!b2bFields.delivery_matches_billing) {
-          saleData.delivery_address = b2bFields.delivery_address
+          baseSaleData.delivery_address = b2bFields.delivery_address
         }
       }
 
       // Add B2C specific fields
       if (saleType === "b2c") {
-        saleData.customer_email = b2cFields.customer_email || undefined
-        saleData.customer_phone = b2cFields.customer_phone
+        baseSaleData.customer_email = b2cFields.customer_email || undefined
+        baseSaleData.customer_phone = b2cFields.customer_phone
         // Send address objects - backend will create them
-        saleData.billing_address = b2cFields.billing_address
+        baseSaleData.billing_address = b2cFields.billing_address
         if (!b2cFields.delivery_matches_billing) {
-          saleData.delivery_address = b2cFields.delivery_address
+          baseSaleData.delivery_address = b2cFields.delivery_address
         }
       }
 
-      const created = await salesApi.create(saleData)
+      const isItemsInvalid = (err: any) => {
+        const details = err?.data?.details
+        if (Array.isArray(details)) {
+          return details.some((detail: any) => {
+            const path = typeof detail?.path === "string" ? detail.path : ""
+            const message = typeof detail?.message === "string" ? detail.message : ""
+            return path.includes("items") || message.toLowerCase().includes("items")
+          })
+        }
+        const msg = typeof err?.message === "string" ? err.message : ""
+        return msg.toLowerCase().includes("items") && msg.toLowerCase().includes("invalid")
+      }
+
+      const submitWithItems = (itemsPayload: any) => salesApi.create({ ...baseSaleData, items: itemsPayload })
+
+      // Prefer array payload, fallback to single object if backend expects it
+      const primaryItemsPayload = normalizedItems
+      const fallbackItemsPayload = normalizedItems.length === 1 ? normalizedItems[0] : null
+
+      let created
+      try {
+        created = await submitWithItems(primaryItemsPayload)
+      } catch (err: any) {
+        if (fallbackItemsPayload && isItemsInvalid(err)) {
+          created = await submitWithItems(fallbackItemsPayload)
+        } else {
+          throw err
+        }
+      }
       onSave(created)
       onClose()
     } catch (err: any) {
-      setError(err.message || "Failed to create sale")
+      const errorDetails = err?.data?.details
+      if (Array.isArray(errorDetails) && errorDetails.length > 0) {
+        const detailMessage = errorDetails
+          .map((detail: any) => {
+            if (detail?.path && detail?.message) {
+              return `${detail.path}: ${detail.message}`
+            }
+            if (detail?.message) return detail.message
+            return typeof detail === "string" ? detail : JSON.stringify(detail)
+          })
+          .join(", ")
+        setError(detailMessage || err.message || "Failed to create sale")
+      } else {
+        setError(err.message || "Failed to create sale")
+      }
       setIsSubmitting(false)
     }
   }
@@ -380,17 +553,68 @@ export default function SalesModal({ saleType, onClose, onSave }: SalesModalProp
             <div className="space-y-4 p-4 bg-slate-700/30 rounded-lg">
               <h3 className="font-semibold text-white mb-3">B2C Customer Details</h3>
               
+              {/* Info Box */}
+              {quotations.length > 0 && (
+                <div className="p-3 bg-blue-900/20 border border-blue-700/50 rounded-lg mb-4">
+                  <p className="text-xs text-blue-300">
+                    💡 <strong>Tip:</strong> Select a customer from existing quotations to auto-fill their details. You can still edit the fields manually.
+                  </p>
+                </div>
+              )}
+              
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
                 <div>
+                  <label className="block text-sm font-medium text-slate-300 mb-2">
+                    Select Customer from Quotation
+                  </label>
+                  <select
+                    value={selectedQuotationId}
+                    onChange={(e) => handleQuotationSelect(e.target.value)}
+                    disabled={loadingQuotations}
+                    className="w-full px-4 py-2 bg-slate-700 border border-slate-600 rounded-lg text-white focus:outline-none focus:border-blue-500 disabled:opacity-50"
+                  >
+                    <option value="">
+                      {loadingQuotations 
+                        ? "Loading quotations..." 
+                        : quotations.length === 0 
+                        ? "No quotations available. Enter manually."
+                        : "Select from existing quotations..."}
+                    </option>
+                    {quotations.map((quotation) => {
+                      const customerName = `${quotation.customer.firstName || ''} ${quotation.customer.lastName || ''}`.trim() || 'Unknown Customer'
+                      const mobile = quotation.customer.mobile || 'N/A'
+                      const quotationId = quotation.id || 'N/A'
+                      return (
+                        <option key={quotation.id} value={quotation.id}>
+                          {customerName} - {mobile} (QT-{quotationId.split('-').pop() || quotationId})
+                        </option>
+                      )
+                    })}
+                  </select>
+                  {loadingQuotations && (
+                    <p className="text-xs text-slate-400 mt-1">Loading quotations...</p>
+                  )}
+                  {!loadingQuotations && quotations.length === 0 && (
+                    <p className="text-xs text-amber-400 mt-1">
+                      No quotations found. You can enter customer details manually below.
+                    </p>
+                  )}
+                  {quotations.length === 0 && !loadingQuotations && (
+                    <p className="text-xs text-slate-500 mt-1">No quotations available. Enter customer details manually.</p>
+                  )}
+                </div>
+
+                <div>
                   <label className="block text-sm font-medium text-slate-300 mb-2">Customer Name *</label>
-            <input
-              type="text"
+                  <input
+                    type="text"
                     value={b2cFields.customer_name}
                     onChange={(e) => setB2cFields({ ...b2cFields, customer_name: e.target.value })}
                     className="w-full px-4 py-2 bg-slate-700 border border-slate-600 rounded-lg text-white focus:outline-none focus:border-blue-500"
-              required
-            />
-          </div>
+                    required
+                    placeholder="Or enter manually"
+                  />
+                </div>
 
           <div>
                   <label className="block text-sm font-medium text-slate-300 mb-2">Phone *</label>
@@ -475,19 +699,39 @@ export default function SalesModal({ saleType, onClose, onSave }: SalesModalProp
                     required
                   >
                     <option value="">Select Product</option>
-                    {products.map((product) => (
-                      <option key={product.id} value={product.id}>
-                        {product.name} - {product.model}
-                      </option>
-                    ))}
+                    {availableStock && filteredProducts.length === 0 && (
+                      <option value="" disabled>No products available</option>
+                    )}
+                    {filteredProducts.map((product) => {
+                      const availableQty = availableStock?.[product.id]
+                      const label = product.model && product.model !== product.name
+                        ? `${product.name} - ${product.model}`
+                        : product.name
+                      return (
+                        <option key={product.id} value={product.id}>
+                          {availableStock ? `${label} (Available: ${availableQty || 0} units)` : label}
+                        </option>
+                      )
+                    })}
                   </select>
+                  {availableStock && filteredProducts.length === 0 && (
+                    <p className="text-xs text-amber-400">
+                      No stock available. Please request stock from your admin first.
+                    </p>
+                  )}
                   <div className="grid grid-cols-2 sm:grid-cols-4 gap-2">
                     <input
                       type="number"
                       value={item.quantity || ""}
-                      onChange={(e) => updateItem(index, "quantity", parseInt(e.target.value) || 0)}
+                      onChange={(e) => {
+                        const raw = parseInt(e.target.value) || 0
+                        const maxQty = availableStock?.[item.product_id]
+                        const nextQty = maxQty ? Math.min(raw, maxQty) : raw
+                        updateItem(index, "quantity", nextQty)
+                      }}
                       placeholder="Qty"
                       min="1"
+                      max={availableStock?.[item.product_id]}
                       className="w-full px-3 sm:px-4 py-2 bg-slate-700 border border-slate-600 rounded-lg text-white focus:outline-none focus:border-blue-500 text-sm sm:text-base"
                       required
                     />

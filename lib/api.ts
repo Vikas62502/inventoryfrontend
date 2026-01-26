@@ -1,5 +1,6 @@
 import { apiClient, type ApiClientError } from "./api-client"
 import type { User, LoginResponse, LoginCredentials } from "./auth"
+import { authService } from "./auth"
 
 // Auth API - Inventory System
 export const authApi = {
@@ -595,6 +596,227 @@ export const stockReturnsApi = {
 
   async delete(id: string): Promise<void> {
     return apiClient.delete<void>(`/stock-returns/${id}`)
+  },
+}
+
+// Quotations API (for B2C Sales)
+export interface QuotationDealer {
+  id: string
+  firstName: string
+  lastName: string
+  email?: string
+  mobile?: string
+  username?: string
+  role?: string
+}
+
+export interface QuotationCustomer {
+  id?: string
+  firstName: string
+  lastName: string
+  mobile: string
+  email?: string | null
+  address?: {
+    street?: string
+    city?: string
+    state?: string
+    pincode?: string
+  }
+}
+
+export interface QuotationProducts {
+  systemType: string
+  phase?: string
+  panelBrand?: string
+  panelSize?: string
+  panelQuantity?: number
+  dcrPanelBrand?: string | null
+  dcrPanelSize?: string | null
+  dcrPanelQuantity?: number | null
+  nonDcrPanelBrand?: string | null
+  nonDcrPanelSize?: string | null
+  nonDcrPanelQuantity?: number | null
+  inverterType?: string
+  inverterBrand?: string
+  inverterSize?: string
+  structureType?: string
+  structureSize?: string
+  meterBrand?: string
+  acCableBrand?: string
+  acCableSize?: string
+  dcCableBrand?: string
+  dcCableSize?: string
+  acdb?: string
+  dcdb?: string
+  hybridInverter?: string | null
+  batteryCapacity?: string | null
+  centralSubsidy?: number
+  stateSubsidy?: number
+}
+
+export interface QuotationPricing {
+  panelPrice?: number
+  inverterPrice?: number
+  structurePrice?: number
+  meterPrice?: number
+  cablePrice?: number
+  acdbDcdbPrice?: number
+  subtotal: number
+  centralSubsidy?: number
+  stateSubsidy?: number
+  totalSubsidy?: number
+  totalAmount: number
+  amountAfterSubsidy?: number
+  discountAmount?: number
+  finalAmount: number
+}
+
+export interface Quotation {
+  id: string
+  dealerId?: string
+  dealer?: QuotationDealer
+  customer: QuotationCustomer
+  finalAmount?: number
+  products?: QuotationProducts
+  pricing?: QuotationPricing
+  status: string
+  discount?: string
+  documents?: any
+  paymentMode?: string | null
+  paidAmount?: number | null
+  paymentDate?: string | null
+  paymentStatus?: string | null
+  createdAt: string
+  validUntil?: string
+}
+
+export interface QuotationsListResponse {
+  success: boolean
+  data: {
+    quotations: Quotation[]
+  }
+}
+
+export interface QuotationDetailResponse {
+  success: boolean
+  data: Quotation
+}
+
+// Agent-Dealer mapping API
+export interface AgentDealerResponse {
+  dealerId: string
+  agentId: string
+}
+
+export const agentDealerApi = {
+  async getDealerId(): Promise<string | null> {
+    try {
+      const response = await apiClient.get<AgentDealerResponse>("/inventory-auth/agent-dealer")
+      console.log("Agent-Dealer mapping response:", response)
+      return response.dealerId || null
+    } catch (err: any) {
+      console.error("Error fetching agent-dealer mapping:", err)
+      // Return null if agent doesn't have a dealerId mapped
+      return null
+    }
+  },
+}
+
+export const quotationsApi = {
+  async getAll(dealerId?: string): Promise<Quotation[]> {
+    try {
+      // For agents: first get their dealerId, then fetch quotations
+      let targetDealerId = dealerId
+      
+      // If dealerId not provided, try to get it for agents
+      if (!targetDealerId) {
+        try {
+          const currentUser = authService.getUser()
+          if (currentUser?.role === "agent") {
+            console.log("Agent detected, fetching dealerId...")
+            targetDealerId = await agentDealerApi.getDealerId()
+            if (!targetDealerId) {
+              console.warn("Agent does not have a dealerId mapped. Quotations may not be available.")
+              return []
+            }
+            console.log("Found dealerId for agent:", targetDealerId)
+          }
+        } catch (err: any) {
+          console.error("Error getting dealerId for agent:", err)
+          // Continue without dealerId - might be admin/super-admin
+        }
+      }
+
+      // Build query params
+      const params: Record<string, string> | undefined = targetDealerId 
+        ? { dealerId: targetDealerId }
+        : undefined
+      
+      console.log("Fetching quotations from /admin/quotations", params ? `with dealerId: ${params.dealerId}` : "without dealerId")
+      const response = await apiClient.get<any>("/admin/quotations", params)
+      console.log("Quotations API raw response:", response)
+      
+      // Handle different response formats
+      // Format 1: { success: true, data: { quotations: [...] } }
+      if (response && typeof response === 'object') {
+        if (response.success && response.data?.quotations && Array.isArray(response.data.quotations)) {
+          console.log("Found quotations in response.data.quotations:", response.data.quotations.length)
+          return response.data.quotations
+        }
+        
+        // Format 2: { success: true, data: [...] } (data is directly the array)
+        if (response.success && Array.isArray(response.data)) {
+          console.log("Found quotations in response.data:", response.data.length)
+          return response.data
+        }
+        
+        // Format 3: { quotations: [...] }
+        if (Array.isArray(response.quotations)) {
+          console.log("Found quotations in response.quotations:", response.quotations.length)
+          return response.quotations
+        }
+        
+        // Format 4: Response is directly an array
+        if (Array.isArray(response)) {
+          console.log("Response is directly an array:", response.length)
+          return response
+        }
+      }
+      
+      console.warn("Unexpected quotations response format:", response)
+      console.warn("Response type:", typeof response)
+      console.warn("Response keys:", response && typeof response === 'object' ? Object.keys(response) : 'N/A')
+      return []
+    } catch (err: any) {
+      console.error("Error fetching quotations:", err)
+      console.error("Error details:", {
+        message: err.message,
+        status: err.status,
+        data: err.data
+      })
+      // Return empty array instead of throwing to allow manual entry
+      return []
+    }
+  },
+
+  async getById(id: string): Promise<Quotation> {
+    try {
+      const response = await apiClient.get<QuotationDetailResponse>(`/quotations/${id}`)
+      console.log("Quotation detail API response:", response)
+      
+      // Handle different response formats
+      if (response.success && response.data) {
+        return response.data
+      } else if (response.id) {
+        // If response is directly the quotation object
+        return response as Quotation
+      }
+      
+      throw new Error("Unexpected quotation detail response format")
+    } catch (err: any) {
+      console.error("Error fetching quotation details:", err)
+      throw err
+    }
   },
 }
 

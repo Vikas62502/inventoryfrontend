@@ -251,9 +251,7 @@ export default function AdminDashboard({ userName }: AdminDashboardProps) {
   const approved = allRequests.filter((r) => r.status === "dispatched" || r.status === "confirmed").length
   const pending = allRequests.filter((r) => r.status === "pending").length
   const rejected = allRequests.filter((r) => r.status === "rejected").length
-  const totalRequested = allRequests.reduce((sum, r) => {
-    return sum + (r.items?.reduce((itemSum, item) => itemSum + item.quantity, 0) || 0)
-  }, 0)
+  const totalInventoryUnits = adminInventory.reduce((sum, item) => sum + item.quantity, 0)
   const approvalRate = allRequests.length > 0 ? Math.round((approved / allRequests.length) * 100) : 0
 
   const inProgress = pending
@@ -336,8 +334,8 @@ export default function AdminDashboard({ userName }: AdminDashboardProps) {
         <Card className="bg-slate-800 border-slate-700 p-3 sm:p-4">
           <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-2">
             <div className="flex-1 min-w-0">
-              <p className="text-slate-400 text-xs sm:text-sm mb-1">Total</p>
-              <p className="text-xl sm:text-2xl font-bold text-cyan-500">{totalRequested}</p>
+              <p className="text-slate-400 text-xs sm:text-sm mb-1">Total Stock Value</p>
+              <p className="text-xl sm:text-2xl font-bold text-cyan-500">{totalInventoryUnits}</p>
             </div>
             <ShoppingCart className="w-5 h-5 sm:w-6 sm:h-6 text-cyan-500 opacity-50 flex-shrink-0" />
           </div>
@@ -700,7 +698,7 @@ export default function AdminDashboard({ userName }: AdminDashboardProps) {
                         </p>
                         <p className="text-xs text-slate-400 mt-1">
                           {request.requested_by_name || "Unknown"}
-                          {isIncomingAdminTransfer && " (Admin Transfer)"}
+                          {isIncomingAdminTransfer && " (Agent Transfer)"}
                           {isOutgoingAdminTransfer && " (To Admin)"}
                         </p>
                       </div>
@@ -839,7 +837,7 @@ export default function AdminDashboard({ userName }: AdminDashboardProps) {
                         <td className="px-4 xl:px-6 py-3 xl:py-4 text-slate-300 text-sm">
                           {request.requested_by_name || "Unknown"}
                           {isIncomingAdminTransfer && (
-                            <span className="ml-2 text-xs text-slate-500">(Admin Transfer)</span>
+                            <span className="ml-2 text-xs text-slate-500">(Agent Transfer)</span>
                           )}
                           {isOutgoingAdminTransfer && (
                             <span className="ml-2 text-xs text-slate-500">(To Admin)</span>

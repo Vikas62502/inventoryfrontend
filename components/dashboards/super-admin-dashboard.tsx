@@ -44,6 +44,7 @@ export default function SuperAdminDashboard({ userName }: SuperAdminDashboardPro
   
   // Agent approval state
   const [pendingAgents, setPendingAgents] = useState<User[]>([])
+  const [allAgents, setAllAgents] = useState<User[]>([])
   const [loadingAgents, setLoadingAgents] = useState(true)
   const [processingAgentIds, setProcessingAgentIds] = useState<Set<string>>(new Set())
   const [agentsSearchQuery, setAgentsSearchQuery] = useState("")
@@ -113,10 +114,11 @@ export default function SuperAdminDashboard({ userName }: SuperAdminDashboardPro
     try {
       setLoadingAgents(true)
       // Backend returns all agents for super-admin
-      const allAgents = await usersApi.getAll("agent")
+      const agents = await usersApi.getAll("agent")
+      setAllAgents(agents)
       // Filter for inactive agents (those needing approval) created by admins
       // Only show agents that are not active and were created by admins
-      const pending = allAgents.filter(agent => 
+      const pending = agents.filter(agent => 
         (agent.is_active === false || agent.is_active === undefined || agent.is_active === null) &&
         // Check if agent was created by an admin (not super-admin or account)
         (agent.created_by_id || agent.admin_id) // Has a creator/admin relationship
@@ -125,6 +127,7 @@ export default function SuperAdminDashboard({ userName }: SuperAdminDashboardPro
     } catch (err) {
       console.error("Failed to load pending agents:", err)
       setPendingAgents([])
+      setAllAgents([])
     } finally {
       setLoadingAgents(false)
     }
@@ -943,6 +946,138 @@ export default function SuperAdminDashboard({ userName }: SuperAdminDashboardPro
               <p className="text-slate-400 text-lg font-semibold mb-2">No Pending Agent Approvals</p>
               <p className="text-slate-500 text-sm">All agents have been approved or there are no pending agent creation requests.</p>
             </Card>
+          )}
+
+          {/* All Agents by Admin Section */}
+          {allAgents.length > 0 && (
+            <div className="mt-8 space-y-4">
+              <div className="flex items-center justify-between flex-wrap gap-4">
+                <h2 className="text-xl font-bold text-white flex items-center gap-2">
+                  <Users className="w-5 h-5 text-cyan-500" />
+                  All Agents by Admin ({allAgents.length})
+                </h2>
+              </div>
+
+              {/* Group agents by admin */}
+              {(() => {
+                // Group agents by created_by_id
+                const agentsByAdmin = new Map<string, User[]>()
+                allAgents.forEach(agent => {
+                  const adminId = agent.created_by_id || agent.admin_id || "unassigned"
+                  if (!agentsByAdmin.has(adminId)) {
+                    agentsByAdmin.set(adminId, [])
+                  }
+                  agentsByAdmin.get(adminId)!.push(agent)
+                })
+
+                // Get admin names and usernames
+                const adminNameMap = new Map<string, string>()
+                const adminUsernameMap = new Map<string, string>()
+                admins.forEach(admin => {
+                  adminNameMap.set(admin.id, admin.name)
+                  adminUsernameMap.set(admin.id, admin.username)
+                })
+                adminNameMap.set("unassigned", "Unassigned Agents")
+                adminUsernameMap.set("unassigned", "unassigned")
+
+                return Array.from(agentsByAdmin.entries()).map(([adminId, adminAgents]) => {
+                  const adminName = adminNameMap.get(adminId) || "Unknown Admin"
+                  const adminUsername = adminUsernameMap.get(adminId) || "unknown"
+                  const filteredAdminAgents = adminAgents.filter(agent => {
+                    if (!agentsSearchQuery.trim()) return true
+                    return (
+                      agent.name?.toLowerCase().includes(agentsSearchQuery.toLowerCase()) ||
+                      agent.username?.toLowerCase().includes(agentsSearchQuery.toLowerCase()) ||
+                      false
+                    )
+                  })
+
+                  if (filteredAdminAgents.length === 0) return null
+
+                  return (
+                    <Card key={adminId} className="bg-slate-800 border-slate-700 p-4 sm:p-6">
+                      <div className="mb-4 pb-4 border-b border-slate-700">
+                        <h3 className="text-lg font-semibold text-white flex items-center gap-2">
+                          <Users className="w-4 h-4 text-cyan-400" />
+                          {adminName} ({adminUsername})
+                          <span className="text-sm text-slate-400 font-normal">
+                            ({filteredAdminAgents.length} {filteredAdminAgents.length === 1 ? 'agent' : 'agents'})
+                          </span>
+                        </h3>
+                      </div>
+
+                      {/* Mobile Card View */}
+                      <div className="block lg:hidden space-y-3">
+                        {filteredAdminAgents.map((agent) => (
+                          <Card key={agent.id} className="bg-slate-700/50 border-slate-600 p-3">
+                            <div className="flex items-start justify-between gap-2">
+                              <div className="flex-1 min-w-0">
+                                <p className="text-white font-semibold text-sm">{agent.name}</p>
+                                <p className="text-xs text-slate-400 mt-1">{agent.username}</p>
+                                <p className="text-xs text-cyan-400 mt-1 flex items-center gap-1">
+                                  <Users className="w-3 h-3" />
+                                  Admin: {adminUsername}
+                                </p>
+                              </div>
+                              <span
+                                className={`px-2 py-1 text-xs font-semibold rounded-full ${
+                                  agent.is_active
+                                    ? "bg-green-500/20 text-green-400 border border-green-500/50"
+                                    : "bg-red-500/20 text-red-400 border border-red-500/50"
+                                }`}
+                              >
+                                {agent.is_active ? "Active" : "Inactive"}
+                              </span>
+                            </div>
+                            <div className="mt-2 pt-2 border-t border-slate-600">
+                              <p className="text-slate-400 text-xs">Created: {formatDateISO(agent.created_at)}</p>
+                            </div>
+                          </Card>
+                        ))}
+                      </div>
+
+                      {/* Desktop Table View */}
+                      <div className="hidden lg:block overflow-x-auto">
+                        <table className="w-full">
+                          <thead className="bg-slate-700/50 border-b border-slate-700">
+                            <tr>
+                              <th className="px-4 py-2 text-left text-xs font-semibold text-slate-300">Name</th>
+                              <th className="px-4 py-2 text-left text-xs font-semibold text-slate-300">Username</th>
+                              <th className="px-4 py-2 text-left text-xs font-semibold text-slate-300">Admin</th>
+                              <th className="px-4 py-2 text-left text-xs font-semibold text-slate-300">Status</th>
+                              <th className="px-4 py-2 text-left text-xs font-semibold text-slate-300">Created Date</th>
+                            </tr>
+                          </thead>
+                          <tbody className="divide-y divide-slate-700">
+                            {filteredAdminAgents.map((agent) => (
+                              <tr key={agent.id} className="hover:bg-slate-700/30 transition">
+                                <td className="px-4 py-3 text-white font-medium text-sm">{agent.name}</td>
+                                <td className="px-4 py-3 text-slate-300 text-sm">{agent.username}</td>
+                                <td className="px-4 py-3 text-cyan-400 text-sm font-medium">{adminUsername}</td>
+                                <td className="px-4 py-3">
+                                  <span
+                                    className={`px-2 py-1 text-xs font-semibold rounded-full ${
+                                      agent.is_active
+                                        ? "bg-green-500/20 text-green-400 border border-green-500/50"
+                                        : "bg-red-500/20 text-red-400 border border-red-500/50"
+                                    }`}
+                                  >
+                                    {agent.is_active ? "Active" : "Inactive"}
+                                  </span>
+                                </td>
+                                <td className="px-4 py-3 text-slate-400 text-sm">
+                                  {formatDateISO(agent.created_at)}
+                                </td>
+                              </tr>
+                            ))}
+                          </tbody>
+                        </table>
+                      </div>
+                    </Card>
+                  )
+                })
+              })()}
+            </div>
           )}
         </TabsContent>
 

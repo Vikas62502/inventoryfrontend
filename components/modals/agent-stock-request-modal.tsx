@@ -4,7 +4,7 @@ import { useState, useEffect } from "react"
 import { Card } from "@/components/ui/card"
 import { Button } from "@/components/ui/button"
 import { X, Loader2, AlertCircle, Plus, Trash2 } from "lucide-react"
-import { productsApi, type Product } from "@/lib/api"
+import { productsApi, adminInventoryApi, type Product, type AdminInventory } from "@/lib/api"
 import { stockRequestsApi } from "@/lib/api"
 import { authService } from "@/lib/auth"
 
@@ -15,6 +15,7 @@ interface AgentStockRequestModalProps {
 
 export default function AgentStockRequestModal({ onClose, onSuccess }: AgentStockRequestModalProps) {
   const [products, setProducts] = useState<Product[]>([])
+  const [adminInventory, setAdminInventory] = useState<AdminInventory[]>([])
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
   const [isSubmitting, setIsSubmitting] = useState(false)
@@ -25,9 +26,37 @@ export default function AgentStockRequestModal({ onClose, onSuccess }: AgentStoc
   useEffect(() => {
     const loadProducts = async () => {
       try {
-        const data = await productsApi.getAll()
-        setProducts(data)
+        setLoading(true)
+        const currentUser = authService.getUser()
+        // Check both created_by_id and admin_id (backend might use either)
+        const adminId = currentUser?.created_by_id || currentUser?.admin_id
+
+        if (!adminId) {
+          setError("Unable to identify your admin. Please contact support.")
+          setLoading(false)
+          return
+        }
+
+        // Load all products
+        const allProducts = await productsApi.getAll()
+        
+        // Load admin's inventory (products they have in stock)
+        const adminStock = await adminInventoryApi.getByAdmin(adminId)
+        setAdminInventory(adminStock)
+
+        // Filter products to only show those the admin has in stock (quantity > 0)
+        const availableProducts = allProducts.filter(product => {
+          const inventoryItem = adminStock.find(inv => inv.product_id === product.id)
+          return inventoryItem && inventoryItem.quantity > 0
+        })
+
+        setProducts(availableProducts)
+
+        if (availableProducts.length === 0) {
+          setError("Your admin currently has no products in stock. Please contact your admin.")
+        }
       } catch (err: any) {
+        console.error("Failed to load products:", err)
         setError(err.message || "Failed to load products")
       } finally {
         setLoading(false)
@@ -65,14 +94,33 @@ export default function AgentStockRequestModal({ onClose, onSuccess }: AgentStoc
         setError("Please select a product and enter a valid quantity for all items")
         return
       }
+
+      // Check if requested quantity exceeds admin's available stock
+      const inventoryItem = adminInventory.find(inv => inv.product_id === item.product_id)
+      const availableStock = inventoryItem?.quantity || 0
+      
+      if (item.quantity > availableStock) {
+        const product = products.find(p => p.id === item.product_id)
+        const productName = product ? `${product.name} ${product.model ? `- ${product.model}` : ''}` : 'Selected product'
+        setError(`${productName}: Requested quantity (${item.quantity}) exceeds available stock (${availableStock})`)
+        return
+      }
     }
 
     try {
       setIsSubmitting(true)
       const currentUser = authService.getUser()
+      // Check both created_by_id and admin_id (backend might use either)
+      const adminId = currentUser?.created_by_id || currentUser?.admin_id
+      
+      if (!adminId) {
+        setError("Unable to identify your admin. Please contact support.")
+        setIsSubmitting(false)
+        return
+      }
       
       const requestData: any = {
-        requested_from: currentUser?.created_by_id || "",
+        requested_from: adminId,
         items: items.map(item => ({ 
           product_id: item.product_id, 
           quantity: parseInt(item.quantity.toString()) 
@@ -165,31 +213,39 @@ export default function AgentStockRequestModal({ onClose, onSuccess }: AgentStoc
 
             <div className="space-y-3">
               {items.map((item, index) => (
-                <div key={index} className="flex gap-2 items-start">
-                  <div className="flex-1">
+                <div key={index} className="flex gap-2 items-center">
+                  <div className="flex-1 min-w-0">
                     <select
                       value={item.product_id}
                       onChange={(e) => updateItem(index, "product_id", e.target.value)}
-                      className="w-full px-3 py-2 bg-slate-700 border border-slate-600 rounded-lg text-white text-sm focus:outline-none focus:border-blue-500"
+                      className="w-full px-3 py-2 bg-slate-700 border border-slate-600 rounded-lg text-white text-sm focus:outline-none focus:border-blue-500 h-10"
                       required
                     >
                       <option value="">Select Product</option>
-                      {products.map((product) => (
-                        <option key={product.id} value={product.id}>
-                          {product.name} {product.model && `- ${product.model}`}
-                        </option>
-                      ))}
+                      {products.map((product) => {
+                        const inventoryItem = adminInventory.find(inv => inv.product_id === product.id)
+                        const availableStock = inventoryItem?.quantity || 0
+                        // Format: "Product Name - Model (Available: X units)" or "Product Name (Available: X units)"
+                        const productDisplay = product.model && product.model !== product.name
+                          ? `${product.name} - ${product.model}`
+                          : product.name
+                        return (
+                          <option key={product.id} value={product.id}>
+                            {productDisplay} (Available: {availableStock} units)
+                          </option>
+                        )
+                      })}
                     </select>
                   </div>
                   
-                  <div className="w-24">
+                  <div className="w-20 flex-shrink-0">
                     <input
                       type="number"
                       min="1"
                       value={item.quantity || ""}
                       onChange={(e) => updateItem(index, "quantity", parseInt(e.target.value) || 0)}
                       placeholder="Qty"
-                      className="w-full px-3 py-2 bg-slate-700 border border-slate-600 rounded-lg text-white text-sm focus:outline-none focus:border-blue-500"
+                      className="w-full px-3 py-2 bg-slate-700 border border-slate-600 rounded-lg text-white text-sm focus:outline-none focus:border-blue-500 h-10"
                       required
                     />
                   </div>
@@ -200,7 +256,7 @@ export default function AgentStockRequestModal({ onClose, onSuccess }: AgentStoc
                       onClick={() => removeItem(index)}
                       variant="ghost"
                       size="sm"
-                      className="text-red-400 hover:text-red-300 hover:bg-red-950 px-2"
+                      className="text-red-400 hover:text-red-300 hover:bg-red-950 px-2 h-10 w-10 flex-shrink-0"
                     >
                       <Trash2 className="w-4 h-4" />
                     </Button>
@@ -225,7 +281,7 @@ export default function AgentStockRequestModal({ onClose, onSuccess }: AgentStoc
           {/* Info Box */}
           <div className="p-4 bg-blue-900/20 border border-blue-700/50 rounded-lg">
             <p className="text-sm text-blue-300">
-              💡 <strong>Note:</strong> Request stock from your admin. Once approved and transferred, you can use it for both B2B and B2C sales.
+              💡 <strong>Note:</strong> Only products that your admin has in stock are shown. Request stock from your admin. Once approved and transferred, you can use it for both B2B and B2C sales.
             </p>
           </div>
 
