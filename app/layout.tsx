@@ -5,7 +5,7 @@ import './globals.css'
 
 const _geist = Geist({ subsets: ["latin"] });
 const _geistMono = Geist_Mono({ subsets: ["latin"] });
-
+//run
 export const metadata: Metadata = {
   title: 'Chairbord Solar - Inventory Management',
   description: 'Solar Inventory Management System by Chairbord',
