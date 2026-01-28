@@ -406,13 +406,6 @@
     "category": "Structural Components"
   },
   {
-    "id": "earthing-backfill",
-    "name": "EARTHING BACK FILL COMPOUND 25KG",
-    "rate": 150.00,
-    "unit": "PCS",
-    "category": "Structural Components"
-  },
-  {
     "id": "14mm-la-thread",
     "name": "14MM X 1MTR LA THREAD",
     "rate": 300.00,
@@ -544,5 +537,62 @@
     "rate": 1500.00,
     "unit": "Fixed",
     "category": "Other"
-  }
+  },
+  {
+   "id": "lighting-arrester-pvc",
+    "name": "Lighting Arrester (pvc 14mm)",
+    "rate": 1500.00,
+    "unit": "Fixed",
+    "category": "Earthing Kit"
+  },
+  {
+    "id": "lighting-arrester-weilded",
+     "name": "Lighting Arrester (weilded 14mm)",
+     "rate": 1500.00,
+     "unit": "Fixed",
+     "category": "Earthing Kit"
+   },
+   {
+    "id": "cooper-bonded-rod17x1",
+     "name": "Cooper Bonded Rod (17mm x 1mtr)",
+     "rate": 1500.00,
+     "unit": "Fixed",
+     "category": "Earthing Kit"
+   },
+   {
+    "id": "cooper-bonded-rod17x2",
+     "name": "Cooper Bonded Rod (17mm x 2mtr)",
+     "rate": 1500.00,
+     "unit": "Fixed",
+     "category": "Earthing Kit"
+   },
+   {
+    "id": "cooper-bonded-rod16x1",
+     "name": "Cooper Bonded Rod (16mm x 1mtr)",
+     "rate": 1500.00,
+     "unit": "Fixed",
+     "category": "Earthing Kit"
+   },
+   {
+    "id": "cooper-bonded-rod16x2",
+     "name": "Cooper Bonded Rod (16mm x 2mtr)",
+     "rate": 1500.00,
+     "unit": "Fixed",
+     "category": "Earthing Kit"
+   },
+   {
+    "id": "earthing-backfill-25kg",
+    "name": "EARTHING BACK FILL COMPOUND 25KG",
+    "rate": 150.00,
+    "unit": "PCS",
+    "category": "Earthing Kit"
+  },
+  {
+    "id": "earthing-backfill-15kg",
+    "name": "EARTHING BACK FILL COMPOUND 15KG",
+    "rate": 150.00,
+    "unit": "PCS",
+    "category": "Earthing Kit"
+  },
+
 ]
