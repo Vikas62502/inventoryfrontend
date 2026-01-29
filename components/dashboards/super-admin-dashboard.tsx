@@ -41,6 +41,7 @@ export default function SuperAdminDashboard({ userName }: SuperAdminDashboardPro
   const [categories, setCategories] = useState<string[]>([])
   const [isDeleting, setIsDeleting] = useState<string | null>(null)
   const [requestsSearchQuery, setRequestsSearchQuery] = useState("")
+  const [referenceUnitsByName, setReferenceUnitsByName] = useState<Record<string, string>>({})
   
   // Agent approval state
   const [pendingAgents, setPendingAgents] = useState<User[]>([])
@@ -106,6 +107,26 @@ export default function SuperAdminDashboard({ userName }: SuperAdminDashboardPro
       }
     }
     loadCategories()
+  }, [])
+
+  // Load product units from reference catalog (for displaying KGS/NOS/etc in UI)
+  useEffect(() => {
+    const loadReferenceUnits = async () => {
+      try {
+        const res = await fetch("/PRODUCT_CATALOG_REFERENCE.json")
+        const data = await res.json()
+        const map: Record<string, string> = {}
+        if (Array.isArray(data)) {
+          data.forEach((item: any) => {
+            if (item?.name && item?.unit) map[String(item.name)] = String(item.unit)
+          })
+        }
+        setReferenceUnitsByName(map)
+      } catch (err) {
+        console.warn("Failed to load PRODUCT_CATALOG_REFERENCE.json for unit display:", err)
+      }
+    }
+    loadReferenceUnits()
   }, [])
 
   // Load pending agents (agents created by admins that need approval)
@@ -564,6 +585,7 @@ export default function SuperAdminDashboard({ userName }: SuperAdminDashboardPro
                             <p className="text-slate-400 text-xs">Quantity</p>
                             <p className={`font-semibold ${(product.quantity || 0) < 50 ? "text-red-400" : "text-cyan-400"}`}>
                               {product.quantity || 0}
+                              {referenceUnitsByName[product.name] ? ` ${referenceUnitsByName[product.name]}` : ""}
                             </p>
                           </div>
                         </div>

@@ -1,22 +1,18 @@
 "use client"
 
-import { useState, useEffect } from "react"
+import { useState, useEffect, useMemo } from "react"
 import { Card } from "@/components/ui/card"
 import { Button } from "@/components/ui/button"
 import { Plus, Users, ShoppingCart, CreditCard, TrendingUp, BarChart3, Target, Loader2, RotateCcw, Search, Download, Package } from "lucide-react"
 import SalesModal from "@/components/modals/sales-modal"
-import AgentStockRequestModal from "@/components/modals/agent-stock-request-modal"
-import StockConfirmationModal from "@/components/modals/stock-confirmation-modal"
 import StockReturnModal from "@/components/modals/stock-return-modal"
 import { Tabs, TabsList, TabsTrigger, TabsContent } from "@/components/ui/tabs"
 import { useSalesState } from "@/hooks/use-sales-state"
-import { useStockRequestsState } from "@/hooks/use-stock-requests-state"
 import { authService } from "@/lib/auth"
-import { salesApi, productsApi, quotationsApi, type Quotation } from "@/lib/api"
+import { salesApi, productsApi, quotationsApi, adminInventoryApi, type Quotation, type AdminInventory } from "@/lib/api"
 import { generateQuotationPDF } from "@/lib/quotation-generator"
 import { formatDateISO } from "@/lib/utils"
 import type { Sale as ApiSale, Product } from "@/lib/api"
-import type { StockRequest } from "@/lib/api"
 
 // Type alias for Sale from API (which has snake_case properties)
 type Sale = ApiSale & { quotation_id?: string; quotation_status?: string; quotation_final_amount?: number }
@@ -27,23 +23,23 @@ interface AgentDashboardProps {
 
 export default function AgentDashboard({ userName }: AgentDashboardProps) {
   const sales = useSalesState([])
-  const requests = useStockRequestsState([])
   const [showSalesModal, setShowSalesModal] = useState(false)
-  const [showStockRequestModal, setShowStockRequestModal] = useState(false)
-  const [showConfirmationModal, setShowConfirmationModal] = useState(false)
   const [showStockReturnModal, setShowStockReturnModal] = useState(false)
   const [saleType, setSaleType] = useState<"b2b" | "b2c" | null>(null)
   const [filterType, setFilterType] = useState<"all" | "B2B" | "B2C">("all")
-  const [selectedRequest, setSelectedRequest] = useState<StockRequest | null>(null)
   const [salesSearchQuery, setSalesSearchQuery] = useState("")
-  const [requestsSearchQuery, setRequestsSearchQuery] = useState("")
   const [downloadingSaleId, setDownloadingSaleId] = useState<string | null>(null)
   const [activeTab, setActiveTab] = useState<string>("sales")
   const [stockSearchQuery, setStockSearchQuery] = useState("")
   const [quotations, setQuotations] = useState<Quotation[]>([])
   const [loadingQuotations, setLoadingQuotations] = useState(true)
+  const [adminInventory, setAdminInventory] = useState<AdminInventory[]>([])
+  const [loadingAdminInventory, setLoadingAdminInventory] = useState(true)
+  const [referenceData, setReferenceData] = useState<any[]>([])
 
-  const currentUserId = authService.getUser()?.id
+  const currentUser = authService.getUser()
+  const currentUserId = currentUser?.id
+  const adminId = currentUser?.created_by_id || currentUser?.admin_id
 
   // Fetch quotations (B2C sales) from quotations API
   useEffect(() => {
@@ -184,25 +180,40 @@ export default function AgentDashboard({ userName }: AgentDashboardProps) {
     }
   }
 
-  // Backend filters stock requests - agents receive only their own requests
-  // Sort requests by date (most recent first)
-  const sortedRequests = [...requests.requests].sort((a, b) => {
-    const dateA = (a.requested_date || a.created_at) ? new Date(a.requested_date || a.created_at).getTime() : 0
-    const dateB = (b.requested_date || b.created_at) ? new Date(b.requested_date || b.created_at).getTime() : 0
-    return dateB - dateA // Descending order (newest first)
-  })
-  
-  // Filter requests by search query (backend already filtered by role)
-  const filteredAndSortedRequests = sortedRequests.filter((r) => {
-    if (!requestsSearchQuery.trim()) return true
-    // Search in requested_by_name or notes
-    return r.requested_by_name?.toLowerCase().includes(requestsSearchQuery.toLowerCase()) ||
-           r.notes?.toLowerCase().includes(requestsSearchQuery.toLowerCase()) ||
-           false
-  })
-  
-  const pendingRequests = filteredAndSortedRequests.filter(r => r.status === "pending")
-  const dispatchedRequests = filteredAndSortedRequests.filter(r => r.status === "dispatched")
+  // Load admin's inventory (stock that agent can work with)
+  useEffect(() => {
+    const loadAdminInventory = async () => {
+      if (!adminId) {
+        setLoadingAdminInventory(false)
+        return
+      }
+      try {
+        setLoadingAdminInventory(true)
+        const inventory = await adminInventoryApi.getByAdmin(adminId)
+        setAdminInventory(inventory)
+      } catch (err) {
+        console.error("Failed to load admin inventory:", err)
+        setAdminInventory([])
+      } finally {
+        setLoadingAdminInventory(false)
+      }
+    }
+    loadAdminInventory()
+  }, [adminId])
+
+  // Load reference data for unit display
+  useEffect(() => {
+    const loadReferenceData = async () => {
+      try {
+        const response = await fetch('/PRODUCT_CATALOG_REFERENCE.json')
+        const refData = await response.json()
+        setReferenceData(refData)
+      } catch (err) {
+        console.error("Failed to load reference data:", err)
+      }
+    }
+    loadReferenceData()
+  }, [])
 
   // Convert quotations to sales format and merge with existing sales
   const quotationSales = quotations.map(convertQuotationToSale)
@@ -233,23 +244,18 @@ export default function AgentDashboard({ userName }: AgentDashboardProps) {
   const handleCreateSale = async (newSale: Sale | Omit<Sale, "id">) => {
     try {
       await sales.addSale(newSale as any)
+      // Refetch sales to get updated list with the new sale
       await sales.refetch()
+      // Reload admin inventory to update available stock (in case backend updated it)
+      if (adminId) {
+        const inventory = await adminInventoryApi.getByAdmin(adminId)
+        setAdminInventory(inventory)
+      }
       setShowSalesModal(false)
       setSaleType(null)
     } catch (err) {
       console.error("Failed to create sale:", err)
     }
-  }
-
-  const handleCreateStockRequest = async () => {
-    await requests.refetch()
-    setShowStockRequestModal(false)
-  }
-
-  const handleConfirmReceipt = async () => {
-    await requests.refetch()
-    setShowConfirmationModal(false)
-    setSelectedRequest(null)
   }
 
   // Calculate metrics based on sales (includes quotations for B2C)
@@ -304,33 +310,33 @@ export default function AgentDashboard({ userName }: AgentDashboardProps) {
         ).sort(([, a], [, b]) => (b as number) - (a as number))[0]
       : null
 
-  // Calculate agent's current stock
-  // Stock received from confirmed requests minus stock sold
-  const confirmedRequests = requests.requests.filter(r => {
-    if (r.status !== "confirmed") return false
-    if (!currentUserId) return false
-    return r.requested_by_id === currentUserId
-  })
-  const stockReceived: Record<string, number> = {}
-  confirmedRequests.forEach(request => {
-    request.items?.forEach(item => {
-      stockReceived[item.product_id] = (stockReceived[item.product_id] || 0) + item.quantity
+  // Calculate stock sold from ALL sales (including quotations for B2C)
+  // This includes both sales.sales and quotationSales
+  // Use useMemo to recalculate when sales or adminInventory changes
+  const stockSold = useMemo(() => {
+    const sold: Record<string, number> = {}
+    
+    // Count stock sold from regular sales
+    sales.sales.forEach(sale => {
+      sale.items?.forEach(item => {
+        if (item.product_id) {
+          sold[item.product_id] = (sold[item.product_id] || 0) + (item.quantity || 0)
+        }
+      })
     })
-  })
+    
+    return sold
+  }, [sales.sales])
 
-  // Stock sold from sales
-  const stockSold: Record<string, number> = {}
-  sales.sales.forEach(sale => {
-    sale.items?.forEach(item => {
-      stockSold[item.product_id] = (stockSold[item.product_id] || 0) + item.quantity
+  // Calculate available stock from admin's inventory (admin's stock minus sold)
+  const availableStockFromAdmin = useMemo(() => {
+    const available: Record<string, number> = {}
+    adminInventory.forEach(inv => {
+      const sold = stockSold[inv.product_id] || 0
+      available[inv.product_id] = Math.max(0, inv.quantity - sold)
     })
-  })
-
-  // Calculate current stock (received - sold)
-  const currentStock: Record<string, number> = {}
-  Object.keys(stockReceived).forEach(productId => {
-    currentStock[productId] = stockReceived[productId] - (stockSold[productId] || 0)
-  })
+    return available
+  }, [adminInventory, stockSold])
 
   // Get products for display
   const [products, setProducts] = useState<Record<string, Product>>({})
@@ -350,22 +356,42 @@ export default function AgentDashboard({ userName }: AgentDashboardProps) {
     loadProducts()
   }, [])
 
-  // Get stock items with product info
-  const stockItems = Object.entries(currentStock)
-    .filter(([_, quantity]) => quantity > 0)
-    .map(([productId, quantity]) => ({
-      productId,
-      quantity,
-      product: products[productId]
-    }))
-    .sort((a, b) => (b.quantity) - (a.quantity))
+  // Unit mapping for display
+  const unitDisplayMap: Record<string, string> = {
+    "NOS": "Quantity",
+    "PCS": "Pieces",
+    "MTR": "Meters",
+    "KGS": "Kilograms",
+    "W": "Watts",
+    "Fixed": "Fixed",
+    "PAC": "Pack",
+    "Pillar": "Pillar",
+  }
 
+  // Convert admin inventory to display format (admin's stock available for agent)
+  const stockItems = adminInventory
+    .map((inv) => {
+      const availableQty = availableStockFromAdmin[inv.product_id] || inv.quantity
+      return {
+        productId: inv.product_id,
+        quantity: availableQty,
+        product: inv.product || products[inv.product_id],
+        unit: (() => {
+          const refProduct = referenceData.find((item: any) => item.id === inv.product_id || item.name === inv.product?.name)
+          return refProduct?.unit ? (unitDisplayMap[refProduct.unit] || refProduct.unit) : ""
+        })(),
+      }
+    })
+    .filter((item) => item.quantity > 0) // Only show products with available stock
+    .sort((a, b) => (b.product?.name || "").localeCompare(a.product?.name || ""))
+
+  // Calculate available stock for sales (admin's stock minus sold)
   const availableStockForSales = stockItems.reduce<Record<string, number>>((acc, item) => {
     acc[item.productId] = item.quantity
     return acc
   }, {})
 
-  if (sales.loading || requests.loading) {
+  if (sales.loading || loadingAdminInventory) {
     return (
       <div className="flex items-center justify-center min-h-[400px]">
         <div className="text-center">
@@ -417,30 +443,6 @@ export default function AgentDashboard({ userName }: AgentDashboardProps) {
         </Card>
       </div>
 
-      {/* Stock Requests Section */}
-      {dispatchedRequests.length > 0 && (
-        <Card className="bg-amber-950/30 border-amber-700 border p-3 sm:p-4">
-          <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3">
-            <div className="flex-1 min-w-0">
-              <p className="text-white font-semibold text-sm sm:text-base mb-1">Stock Requests Awaiting Confirmation</p>
-              <p className="text-xs sm:text-sm text-slate-400">
-                You have {dispatchedRequests.length} dispatched request(s) that need confirmation
-              </p>
-            </div>
-            <Button
-              onClick={() => {
-                if (dispatchedRequests[0]) {
-                  setSelectedRequest(dispatchedRequests[0])
-                  setShowConfirmationModal(true)
-                }
-              }}
-              className="bg-amber-600 hover:bg-amber-700 text-white text-xs sm:text-sm w-full sm:w-auto"
-            >
-              Confirm Receipt
-            </Button>
-          </div>
-        </Card>
-      )}
 
       {/* Tabs Navigation */}
       <Tabs value={activeTab} onValueChange={setActiveTab} className="w-full">
@@ -451,11 +453,7 @@ export default function AgentDashboard({ userName }: AgentDashboardProps) {
           </TabsTrigger>
           <TabsTrigger value="stock" className="data-[state=active]:bg-cyan-600 data-[state=active]:text-white">
             <Package className="w-4 h-4 mr-2" />
-            My Stock
-          </TabsTrigger>
-          <TabsTrigger value="requests" className="data-[state=active]:bg-amber-600 data-[state=active]:text-white">
-            <TrendingUp className="w-4 h-4 mr-2" />
-            Stock Requests
+            Admin Stock
           </TabsTrigger>
         </TabsList>
 
@@ -723,13 +721,16 @@ export default function AgentDashboard({ userName }: AgentDashboardProps) {
         </TabsContent>
 
         <TabsContent value="stock" className="mt-4">
-          {/* My Stock Section */}
+          {/* Admin Stock Section */}
           <div className="space-y-3 sm:space-y-4">
             <div className="flex items-center justify-between flex-wrap gap-4">
               <h2 className="text-lg sm:text-xl font-bold text-white flex items-center gap-2">
                 <Package className="w-5 h-5 text-cyan-500" />
-                My Stock
+                Admin Stock
               </h2>
+              <p className="text-xs sm:text-sm text-slate-400">
+                Stock available from your admin (stock remains with admin)
+              </p>
             </div>
 
             {/* Search for Stock */}
@@ -744,7 +745,12 @@ export default function AgentDashboard({ userName }: AgentDashboardProps) {
               />
             </div>
 
-            {(() => {
+            {loadingAdminInventory ? (
+              <Card className="bg-slate-800 border-slate-700 p-8 text-center">
+                <Loader2 className="w-8 h-8 text-cyan-500 animate-spin mx-auto mb-4" />
+                <p className="text-slate-400">Loading admin stock...</p>
+              </Card>
+            ) : (() => {
               const filteredStock = stockItems.filter((item) => {
                 if (!stockSearchQuery) return true
                 const searchLower = stockSearchQuery.toLowerCase()
@@ -776,7 +782,7 @@ export default function AgentDashboard({ userName }: AgentDashboardProps) {
                     </div>
                     <div className="text-right">
                       <p className="text-2xl font-bold text-cyan-400">{item.quantity}</p>
-                      <p className="text-xs text-slate-400">units</p>
+                      <p className="text-xs text-slate-400">{item.unit || "units"}</p>
                     </div>
                   </div>
                 </Card>
@@ -809,7 +815,7 @@ export default function AgentDashboard({ userName }: AgentDashboardProps) {
                         </td>
                         <td className="px-6 py-4">
                           <span className="text-cyan-400 font-bold text-lg">{item.quantity}</span>
-                          <span className="text-slate-400 text-sm ml-1">units</span>
+                          <span className="text-slate-400 text-sm ml-1">{item.unit || "units"}</span>
                         </td>
                       </tr>
                     ))}
@@ -843,7 +849,9 @@ export default function AgentDashboard({ userName }: AgentDashboardProps) {
                   <p className="text-slate-500 text-sm">
                     {stockSearchQuery
                       ? "Try adjusting your search query"
-                      : "Your stock will appear here once you receive confirmed stock requests"}
+                      : adminId
+                        ? "No stock available from your admin"
+                        : "Unable to load admin stock. Please contact support."}
                   </p>
                 </Card>
               )
@@ -851,103 +859,6 @@ export default function AgentDashboard({ userName }: AgentDashboardProps) {
           </div>
         </TabsContent>
 
-        <TabsContent value="requests" className="mt-4">
-          {/* Stock Requests */}
-          <div className="space-y-3 sm:space-y-4">
-            <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3 sm:gap-4">
-              <h2 className="text-lg sm:text-xl font-bold text-white">My Stock Requests</h2>
-              <Button
-                onClick={() => {
-                  setShowStockRequestModal(true)
-                }}
-                className="bg-amber-600 hover:bg-amber-700 text-white text-xs sm:text-sm py-2 sm:py-2.5"
-              >
-                <Plus className="w-3 h-3 sm:w-4 sm:h-4 mr-1.5 sm:mr-2" />
-                Request Stock
-              </Button>
-            </div>
-          
-            {/* Search for Stock Requests */}
-            <div className="relative">
-              <Search className="w-4 h-4 absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" />
-              <input
-                type="text"
-                placeholder="Search requests by user or notes..."
-                value={requestsSearchQuery}
-                onChange={(e) => setRequestsSearchQuery(e.target.value)}
-                className="w-full pl-10 pr-4 py-2 text-sm bg-slate-700 border border-slate-600 rounded-lg text-white placeholder-slate-500 focus:outline-none focus:border-amber-500"
-              />
-            </div>
-            
-            {filteredAndSortedRequests.length > 0 ? (
-              <div className="space-y-2">
-                {filteredAndSortedRequests.map((request) => (
-              <Card
-                key={request.id}
-                className={`border-l-4 p-3 sm:p-4 ${
-                  request.status === "pending"
-                    ? "bg-amber-950/30 border-l-amber-500"
-                    : request.status === "dispatched"
-                      ? "bg-green-950/30 border-l-green-500"
-                      : request.status === "confirmed"
-                        ? "bg-cyan-950/30 border-l-cyan-500"
-                        : "bg-red-950/30 border-l-red-500"
-                }`}
-              >
-                <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-2 sm:gap-0">
-                  <div className="flex-1 min-w-0">
-                    <p className="text-white font-medium text-sm truncate">
-                      {request.primary_product_name || request.items?.[0]?.product?.name || "Multiple Products"}
-                    </p>
-                    <p className="text-xs text-slate-400 mt-1">
-                      Qty: {request.items?.reduce((sum, item) => sum + item.quantity, 0) || 0} •{" "}
-                      {formatDateISO(request.requested_date || request.created_at)}
-                    </p>
-                  </div>
-                  <div className="flex items-center gap-2 w-full sm:w-auto">
-                    <span
-                      className={`px-2 py-1 text-xs font-semibold rounded flex-shrink-0 ${
-                        request.status === "pending"
-                          ? "bg-amber-500 text-amber-950"
-                          : request.status === "dispatched"
-                            ? "bg-green-500 text-green-950"
-                            : request.status === "confirmed"
-                              ? "bg-cyan-500 text-cyan-950"
-                              : "bg-red-500 text-red-950"
-                      }`}
-                    >
-                      {request.status.charAt(0).toUpperCase() + request.status.slice(1)}
-                    </span>
-                    {request.status === "dispatched" && (
-                      <Button
-                        size="sm"
-                        onClick={() => {
-                          setSelectedRequest(request)
-                          setShowConfirmationModal(true)
-                        }}
-                        className="bg-cyan-600 hover:bg-cyan-700 text-white text-xs flex-1 sm:flex-initial"
-                      >
-                        Confirm
-                      </Button>
-                    )}
-                  </div>
-                </div>
-              </Card>
-            ))}
-              </div>
-            ) : (
-            <Card className="bg-slate-800 border-slate-700 p-8 text-center">
-              <TrendingUp className="w-12 h-12 text-slate-500 mx-auto mb-4" />
-              <p className="text-slate-400 text-lg font-semibold mb-2">No Stock Requests</p>
-              <p className="text-slate-500 text-sm">
-                {requestsSearchQuery
-                  ? "Try adjusting your search query"
-                  : "You haven't made any stock requests yet"}
-              </p>
-            </Card>
-          )}
-          </div>
-        </TabsContent>
       </Tabs>
 
       {/* Modals */}
@@ -963,23 +874,6 @@ export default function AgentDashboard({ userName }: AgentDashboardProps) {
         />
       )}
 
-      {showStockRequestModal && (
-        <AgentStockRequestModal
-          onClose={() => setShowStockRequestModal(false)}
-          onSuccess={handleCreateStockRequest}
-        />
-      )}
-
-      {showConfirmationModal && selectedRequest && (
-        <StockConfirmationModal
-          request={selectedRequest as StockRequest}
-          onConfirm={handleConfirmReceipt}
-          onClose={() => {
-            setShowConfirmationModal(false)
-            setSelectedRequest(null)
-          }}
-        />
-      )}
       {showStockReturnModal && (
         <StockReturnModal
           userRole="agent"

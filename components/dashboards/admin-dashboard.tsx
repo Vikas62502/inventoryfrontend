@@ -6,7 +6,6 @@ import { Button } from "@/components/ui/button"
 import { Plus, CheckCircle, Clock, XCircle, ShoppingCart, AlertCircle, TrendingUp, Loader2, RotateCcw, UserPlus, Search, Package } from "lucide-react"
 import { Tabs, TabsList, TabsTrigger, TabsContent } from "@/components/ui/tabs"
 import AdminStockRequestModal from "@/components/modals/admin-stock-request-modal"
-import EnhancedRequestApprovalModal from "@/components/modals/enhanced-request-approval-modal"
 import StockConfirmationModal from "@/components/modals/stock-confirmation-modal"
 import StockReturnModal from "@/components/modals/stock-return-modal"
 import CreateUserModal from "@/components/modals/create-user-modal"
@@ -25,7 +24,6 @@ export default function AdminDashboard({ userName }: AdminDashboardProps) {
   const requests = useStockRequestsState([])
   const [showRequestModal, setShowRequestModal] = useState(false)
   const [requestModalType, setRequestModalType] = useState<"super-admin" | "admin-transfer" | null>(null)
-  const [showApprovalModal, setShowApprovalModal] = useState(false)
   const [showConfirmationModal, setShowConfirmationModal] = useState(false)
   const [showStockReturnModal, setShowStockReturnModal] = useState(false)
   const [showCreateUserModal, setShowCreateUserModal] = useState(false)
@@ -218,29 +216,6 @@ export default function AdminDashboard({ userName }: AdminDashboardProps) {
     setRequestModalType(null)
   }
 
-  const handleApproveRequest = async () => {
-    if (!selectedRequest) return
-    try {
-      await requests.approveRequest(selectedRequest.id)
-      await requests.refetch()
-      setShowApprovalModal(false)
-      setSelectedRequest(null)
-    } catch (err) {
-      console.error("Failed to approve request:", err)
-    }
-  }
-
-  const handleRejectRequest = async () => {
-    if (!selectedRequest) return
-    try {
-      await requests.rejectRequest(selectedRequest.id, "Rejected by admin")
-      await requests.refetch()
-      setShowApprovalModal(false)
-      setSelectedRequest(null)
-    } catch (err) {
-      console.error("Failed to reject request:", err)
-    }
-  }
 
   const handleConfirmReceipt = async () => {
     await requests.refetch()
@@ -271,15 +246,8 @@ export default function AdminDashboard({ userName }: AdminDashboardProps) {
       return sum + (r.items?.reduce((itemSum, item) => itemSum + item.quantity, 0) || 0)
     }, 0)
 
-  const stockTransferredToAgents = allRequests
-    .filter((r) => 
-      r.requested_from === currentUserId && // Admin sent stock
-      r.requested_by_id !== currentUserId && // To someone else (agents)
-      (r.status === "confirmed" || r.status === "dispatched") // Dispatched or confirmed
-    )
-    .reduce((sum, r) => {
-      return sum + (r.items?.reduce((itemSum, item) => itemSum + item.quantity, 0) || 0)
-    }, 0)
+  // Agents no longer request stock, so no stock is transferred to agents
+  const stockTransferredToAgents = 0
 
   const adminNetStock = confirmedStockReceived - stockTransferredToAgents
 
@@ -583,18 +551,6 @@ export default function AdminDashboard({ userName }: AdminDashboardProps) {
               <span className="whitespace-nowrap">Request from Super Admin</span>
             </Button>
             <Button
-              onClick={() => {
-                setRequestModalType("admin-transfer")
-                setShowRequestModal(true)
-              }}
-              variant="outline"
-              className="border-blue-600 text-blue-400 hover:bg-blue-950 hover:text-blue-400 hover:brightness-110 text-sm sm:text-base w-full sm:w-auto"
-              size="sm"
-            >
-            <Plus className="w-4 h-4 mr-2" />
-              <span className="whitespace-nowrap">Transfer to Admin</span>
-            </Button>
-            <Button
               onClick={() => setShowStockReturnModal(true)}
               variant="outline"
               className="border-amber-600 text-amber-400 hover:bg-amber-950 hover:text-amber-400 hover:brightness-110 text-sm sm:text-base w-full sm:w-auto"
@@ -677,16 +633,7 @@ export default function AdminDashboard({ userName }: AdminDashboardProps) {
         <div className="block lg:hidden space-y-3">
           {filteredRequests.length > 0 ? (
             filteredRequests.map((request) => {
-              const isMyRequest = request.requested_by_id === currentUserId
-              const isAgentRequest = request.requested_from === "admin" && !isMyRequest
-              const isIncomingAdminTransfer = request.requested_from === currentUserId && 
-                                              request.requested_by_id !== currentUserId &&
-                                              request.requested_from !== "admin" &&
-                                              request.requested_from !== "super-admin"
-              const isOutgoingAdminTransfer = request.requested_by_id === currentUserId &&
-                                              request.requested_from !== "super-admin" &&
-                                              request.requested_from !== "admin" &&
-                                              request.requested_from !== currentUserId
+              const isMyRequest = request.requested_by_id === currentUserId && request.requested_from === "super-admin"
               
               return (
                 <Card key={request.id} className="bg-slate-800 border-slate-700 p-4">
@@ -698,8 +645,6 @@ export default function AdminDashboard({ userName }: AdminDashboardProps) {
                         </p>
                         <p className="text-xs text-slate-400 mt-1">
                           {request.requested_by_name || "Unknown"}
-                          {isIncomingAdminTransfer && " (Agent Transfer)"}
-                          {isOutgoingAdminTransfer && " (To Admin)"}
                         </p>
                       </div>
                       {request.status === "pending" && (
@@ -753,20 +698,7 @@ export default function AdminDashboard({ userName }: AdminDashboardProps) {
                     </div>
 
                     <div className="pt-2 border-t border-slate-700">
-                      {(isAgentRequest || isIncomingAdminTransfer) && request.status === "pending" && (
-                        <Button
-                          size="sm"
-                          onClick={() => {
-                            setSelectedRequest(request)
-                            setShowApprovalModal(true)
-                          }}
-                          className="w-full bg-green-600 hover:bg-green-700 text-white text-xs"
-                        >
-                          Review
-                        </Button>
-                      )}
-                      {((isMyRequest && request.requested_from === "super-admin") || isOutgoingAdminTransfer) && 
-                       request.status === "dispatched" && (
+                      {isMyRequest && request.status === "dispatched" && (
                         <Button
                           size="sm"
                           onClick={() => {
@@ -813,18 +745,7 @@ export default function AdminDashboard({ userName }: AdminDashboardProps) {
               <tbody className="divide-y divide-slate-700">
                 {filteredRequests.length > 0 ? (
                   filteredRequests.map((request) => {
-                    const isMyRequest = request.requested_by_id === currentUserId
-                    const isAgentRequest = request.requested_from === "admin" && !isMyRequest
-                    // Incoming admin transfer: requests sent TO this admin from another admin
-                    const isIncomingAdminTransfer = request.requested_from === currentUserId && 
-                                                    request.requested_by_id !== currentUserId &&
-                                                    request.requested_from !== "admin" &&
-                                                    request.requested_from !== "super-admin"
-                    // Outgoing admin transfer: requests sent BY this admin to another admin
-                    const isOutgoingAdminTransfer = request.requested_by_id === currentUserId &&
-                                                    request.requested_from !== "super-admin" &&
-                                                    request.requested_from !== "admin" &&
-                                                    request.requested_from !== currentUserId
+                    const isMyRequest = request.requested_by_id === currentUserId && request.requested_from === "super-admin"
                     
                     return (
                     <tr key={request.id} className="hover:bg-slate-700/30 transition">
@@ -836,12 +757,6 @@ export default function AdminDashboard({ userName }: AdminDashboardProps) {
                         </td>
                         <td className="px-4 xl:px-6 py-3 xl:py-4 text-slate-300 text-sm">
                           {request.requested_by_name || "Unknown"}
-                          {isIncomingAdminTransfer && (
-                            <span className="ml-2 text-xs text-slate-500">(Agent Transfer)</span>
-                          )}
-                          {isOutgoingAdminTransfer && (
-                            <span className="ml-2 text-xs text-slate-500">(To Admin)</span>
-                          )}
                         </td>
                         <td className="px-4 xl:px-6 py-3 xl:py-4 text-slate-400 text-sm">
                           {formatDateISO(request.requested_date || request.created_at)}
@@ -870,22 +785,8 @@ export default function AdminDashboard({ userName }: AdminDashboardProps) {
                       </td>
                         <td className="px-4 xl:px-6 py-3 xl:py-4">
                           <div className="flex flex-col sm:flex-row gap-2">
-                            {/* Show Review button for agent requests or incoming admin transfers that are pending */}
-                            {(isAgentRequest || isIncomingAdminTransfer) && request.status === "pending" && (
-                              <Button
-                                size="sm"
-                                onClick={() => {
-                                  setSelectedRequest(request)
-                                  setShowApprovalModal(true)
-                                }}
-                                className="bg-green-600 hover:bg-green-700 text-white text-xs"
-                              >
-                                Review
-                              </Button>
-                            )}
-                            {/* Show Confirm Receipt button for my requests (to super-admin or outgoing admin transfers) that are dispatched */}
-                            {((isMyRequest && request.requested_from === "super-admin") || isOutgoingAdminTransfer) && 
-                             request.status === "dispatched" && (
+                            {/* Show Confirm Receipt button for my requests to super-admin that are dispatched */}
+                            {isMyRequest && request.status === "dispatched" && (
                               <Button
                                 size="sm"
                                 onClick={() => {
@@ -1529,17 +1430,6 @@ export default function AdminDashboard({ userName }: AdminDashboardProps) {
         />
       )}
 
-      {showApprovalModal && selectedRequest && (
-        <EnhancedRequestApprovalModal
-          request={selectedRequest}
-          onApprove={handleApproveRequest}
-          onReject={handleRejectRequest}
-          onClose={() => {
-            setShowApprovalModal(false)
-            setSelectedRequest(null)
-          }}
-        />
-      )}
 
       {showConfirmationModal && selectedRequest && (
         <StockConfirmationModal

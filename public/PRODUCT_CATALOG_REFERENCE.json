@@ -287,18 +287,81 @@
     "category": "Meters"
   },
   {
-    "id": "meter-net-generic",
-    "name": "NET METER",
-    "rate": 3065.79,
+    "id": "meter-secure-1ph-net",
+    "name": "Secure 1 PHASE NET METER",
+    "rate": 2292.31,
     "unit": "NOS",
     "category": "Meters"
   },
   {
-    "id": "meter-solar-generic",
-    "name": "SOLAR METER",
-    "rate": 2338.75,
+    "id": "meter-secure-1ph-solar",
+    "name": "Secure 1 PHASE SOLAR METER",
+    "rate": 2055.56,
     "unit": "NOS",
     "category": "Meters"
+  },
+  {
+    "id": "meter-secure-3ph-net",
+    "name": "Secure 3 PHASE NET METER",
+    "rate": 3700.00,
+    "unit": "NOS",
+    "category": "Meters"
+  },
+  {
+    "id": "meter-indo-box-1ph",
+    "name": "Indo Meter Box 1ph",
+    "rate": 3500.00,
+    "unit": "NOS",
+    "category": "Meters"
+  },
+  {
+    "id": "meter-indo-box-3ph",
+    "name": "Indo Meter Box 3ph",
+    "rate": 3500.00,
+    "unit": "NOS",
+    "category": "Meters"
+  },
+  {
+    "id": "meter-acdb-32amp-2pole-havells",
+    "name": "ACDB 32AMP 2POLE HAVELLS MCB \"ELMAK SPD",
+    "rate": 1080.00,
+    "unit": "NOS",
+    "category": "Electrical Components"
+  },
+  {
+    "id": "meter-acdb-32amp-4pole-havells",
+    "name": "ACDB 32 AMP 4 POLE HAVELLS MCB & ELMAC",
+    "rate": 2200.00,
+    "unit": "NOS",
+    "category": "Electrical Components"
+  },
+  {
+    "id": "meter-acdb-3p-5-10kw-havells",
+    "name": "ACDB 3P (5-10 KW, HAVEELLS & BLITZ)",
+    "rate": 1850.00,
+    "unit": "NOS",
+    "category": "Electrical Components"
+  },
+  {
+    "id": "meter-acdb-dcdb-1ph-combo",
+    "name": "ACDB & DCDB 1PH COMBO (HAVELLS & BLITZ, 32A, 1000V)",
+    "rate": 1700.00,
+    "unit": "NOS",
+    "category": "Electrical Components"
+  },
+  {
+    "id": "meter-dcdb-1in-1out-1000v",
+    "name": "DCDB 1 IN 1OUT 1000VOLT SPD 25AMP FUSE",
+    "rate": 1375.00,
+    "unit": "NOS",
+    "category": "Electrical Components"
+  },
+  {
+    "id": "meter-dcdb-1in-1out-600v",
+    "name": "DCDB 1 IN 1OUT 600VOLT SPD 25AMP FUSE",
+    "rate": 1050.00,
+    "unit": "NOS",
+    "category": "Electrical Components"
   },
   {
     "id": "acdb-32amp-2pole-havells",
@@ -343,6 +406,13 @@
     "category": "Electrical Components"
   },
   {
+    "id": "gp-tube-25x25x2",
+    "name": "G.P. TUBES 25*25*2.0 MM(28)",
+    "rate": 1860.49,
+    "unit": "PCS",
+    "category": "Structural Components"
+  },
+  {
     "id": "gp-tube-40x40x2",
     "name": "G.P. TUBES 40*40*2.0MM(14)",
     "rate": 968.16,
@@ -371,8 +441,15 @@
     "category": "Structural Components"
   },
   {
-    "id": "hr-plate-base-plate",
-    "name": "H R PLATE / BASE PLATE",
+    "id": "hr-plate-base-plate-6x6",
+    "name": "H R PLATE / BASE PLATE 6*6",
+    "rate": 114.00,
+    "unit": "PCS",
+    "category": "Structural Components"
+  },
+  {
+    "id": "hr-plate-base-plate-8x8",
+    "name": "H R PLATE / BASE PLATE 8*8",
     "rate": 114.00,
     "unit": "PCS",
     "category": "Structural Components"
@@ -406,9 +483,9 @@
     "category": "Structural Components"
   },
   {
-    "id": "earthing-backfill",
-    "name": "EARTHING BACK FILL COMPOUND 25KG",
-    "rate": 150.00,
+    "id": "anchor-bolt-12x125",
+    "name": "Anchor Fastener (12*125)",
+    "rate": 444.97,
     "unit": "PCS",
     "category": "Structural Components"
   },
@@ -448,6 +525,28 @@
     "category": "Structural Components"
   },
   {
+    "id": "17mm-2mtr-cbr",
+    "name": "Nut Bolt 5inch 4suit",
+    "rate": 340.00,
+    "unit": "KGS",
+    "category": "Structural Components"
+  },
+  {
+    "id": "17mm-2mtr-cbr",
+    "name": "Nut Bolt 5inch 3suit",
+    "rate": 340.00,
+    "unit": "KGS",
+    "category": "Structural Components"
+  },
+  {
+    "id": "17mm-2mtr-cbr",
+    "name": "J hook 40*40",
+    "rate": 340.00,
+    "unit": "KGS",
+    "category": "Structural Components"
+  },
+ 
+  {
     "id": "solar-connector-mc4",
     "name": "SOLAR CONNECTROR MC4 (LQ-1)",
     "rate": 19.88,
@@ -455,8 +554,8 @@
     "category": "Accessories"
   },
   {
-    "id": "cable-tie",
-    "name": "CABLE TIE",
+    "id": "cable-tie-350mm",
+    "name": "CABLE TIE 350mm",
     "rate": 134.29,
     "unit": "NOS",
     "category": "Accessories"
@@ -504,6 +603,537 @@
     "category": "Accessories"
   },
   {
+   "id": "lighting-arrester-pvc",
+    "name": "Lighting Arrester (pvc 14mm)",
+    "rate": 1500.00,
+    "unit": "Fixed",
+    "category": "Earthing Kit"
+  },
+  {
+    "id": "lighting-arrester-weilded",
+     "name": "Lighting Arrester (weilded 14mm)",
+     "rate": 1500.00,
+     "unit": "Fixed",
+     "category": "Earthing Kit"
+   },
+   {
+    "id": "cooper-bonded-rod17x1",
+     "name": "Cooper Bonded Rod (17mm x 1mtr)",
+     "rate": 1500.00,
+     "unit": "Fixed",
+     "category": "Earthing Kit"
+   },
+   {
+    "id": "cooper-bonded-rod17x2",
+     "name": "Cooper Bonded Rod (17mm x 2mtr)",
+     "rate": 1500.00,
+     "unit": "Fixed",
+     "category": "Earthing Kit"
+   },
+   {
+    "id": "cooper-bonded-rod16x1",
+     "name": "Cooper Bonded Rod (16mm x 1mtr)",
+     "rate": 1500.00,
+     "unit": "Fixed",
+     "category": "Earthing Kit"
+   },
+   {
+    "id": "cooper-bonded-rod16x2",
+     "name": "Cooper Bonded Rod (16mm x 2mtr)",
+     "rate": 1500.00,
+     "unit": "Fixed",
+     "category": "Earthing Kit"
+   },
+   {
+    "id": "earthing-backfill-25kg",
+    "name": "EARTHING BACK FILL COMPOUND 25KG",
+    "rate": 150.00,
+    "unit": "PCS",
+    "category": "Earthing Kit"
+  },
+  {
+    "id": "earthing-backfill-15kg",
+    "name": "EARTHING BACK FILL COMPOUND 15KG",
+    "rate": 150.00,
+    "unit": "PCS",
+    "category": "Earthing Kit"
+  },
+  {
+    "id": "orbit-w1-3k-g3",
+    "name": "WAAREE SOLAR ONGRID INVERTER 1ph-3K-G3",
+    "rate": 17500.00,
+    "unit": "NOS",
+    "category": "Inverters",
+    "phase": "1ph"
+  },
+  {
+    "id": "orbit-w1-5k-g3",
+    "name": "WAAREE SOLAR ONGRID INVERTER 1ph-5K-G3",
+    "rate": 31000.00,
+    "unit": "NOS",
+    "category": "Inverters",
+    "phase": "1ph"
+  },
+  {
+    "id": "orbit-w1-6k-g3",
+    "name": "WAAREE SOLAR ONGRID INVERTER 1ph-6K-G3",
+    "rate": 31500.00,
+    "unit": "NOS",
+    "category": "Inverters",
+    "phase": "1ph"
+  },
+  {
+    "id": "orbit-w3-5k-g3",
+    "name": "WAAREE SOLAR ONGRID INVERTER 3ph-5K-G3",
+    "rate": 45000.00,
+    "unit": "NOS",
+    "category": "Inverters",
+    "phase": "3ph"
+  },
+  {
+    "id": "orbit-w3-6k-g3",
+    "name": "WAAREE SOLAR ONGRID INVERTER  3ph-6K-G3",
+    "rate": 46000.00,
+    "unit": "NOS",
+    "category": "Inverters",
+    "phase": "3ph"
+  },
+  {
+    "id": "orbit-w3-8k-g3",
+    "name": "WAAREE SOLAR ONGRID INVERTER 3ph-8K-G3",
+    "rate": 47500.00,
+    "unit": "NOS",
+    "category": "Inverters",
+    "phase": "3ph"
+  },
+  {
+    "id": "orbit-w3-10k-g3",
+    "name": "WAAREE SOLAR ONGRID INVERTER 3ph-10K-G3",
+    "rate": 49500.00,
+    "unit": "NOS",
+    "category": "Inverters",
+    "phase": "3ph"
+  },
+  {
+    "id": "orbit-w3-15k-g3",
+    "name": "WAAREE SOLAR ONGRID INVERTER 3ph-15K-G3",
+    "rate": 67500.00,
+    "unit": "NOS",
+    "category": "Inverters",
+    "phase": "3ph"
+  },
+  {
+    "id": "orbit-w3-20k-g3",
+    "name": "WAAREE SOLAR ONGRID INVERTER 3ph-20K-G3",
+    "rate": 70000.00,
+    "unit": "NOS",
+    "category": "Inverters",
+    "phase": "3ph"
+  },
+  {
+    "id": "orbit-w3-25k-g3",
+    "name": "WAAREE SOLAR ONGRID INVERTER 3ph-25K-G3",
+    "rate": 80000.00,
+    "unit": "NOS",
+    "category": "Inverters",
+    "phase": "3ph"
+  },
+  {
+    "id": "orbit-w3-30k-g3",
+    "name": "WAAREE SOLAR ONGRID INVERTER 3ph-30K-G3",
+    "rate": 126800.00,
+    "unit": "NOS",
+    "category": "Inverters",
+    "phase": "3ph"
+  },
+  {
+    "id": "orbit-w3-50k-g3",
+    "name": "WAAREE SOLAR ONGRID INVERTER 3ph-50K-G3",
+    "rate": 167900.00,
+    "unit": "NOS",
+    "category": "Inverters",
+    "phase": "3ph"
+  },
+  {
+    "id": "orbit-w3-60k-g3",
+    "name": "WAAREE SOLAR ONGRID INVERTER 3ph-60K-G3",
+    "rate": 179800.00,
+    "unit": "NOS",
+    "category": "Inverters",
+    "phase": "3ph"
+  },
+  {
+    "id": "orbit-w3-80k-g3",
+    "name": "WAAREE SOLAR ONGRID INVERTER 3ph-80K-G3",
+    "rate": 284300.00,
+    "unit": "NOS",
+    "category": "Inverters",
+    "phase": "3ph"
+  },
+  {
+    "id": "orbit-w3-100k-g3",
+    "name": "WAAREE SOLAR ONGRID INVERTER 3ph-100K-G3",
+    "rate": 291500.00,
+    "unit": "NOS",
+    "category": "Inverters",
+    "phase": "3ph"
+  },
+  {
+    "id": "vsole-vs-2015",
+    "name": "VSOLE SOLAR ONGRID INVERTER Single Phase 2.0KW VS-2015",
+    "rate": 13600.00,
+    "unit": "NOS",
+    "category": "Inverters",
+    "phase": "1ph",
+    "mppt": "Single"
+  },
+  {
+    "id": "vsole-vs-3015",
+    "name": "VSOLE SOLAR ONGRID INVERTER Single Phase 3.0KW VS-3015",
+    "rate": 14500.00,
+    "unit": "NOS",
+    "category": "Inverters",
+    "phase": "1ph",
+    "mppt": "Single"
+  },
+  {
+    "id": "vsole-vs-3415",
+    "name": "VSOLE SOLAR ONGRID INVERTER Single Phase 3.4KW VS-3415",
+    "rate": 14800.00,
+    "unit": "NOS",
+    "category": "Inverters",
+    "phase": "1ph",
+    "mppt": "Single"
+  },
+  {
+    "id": "vsole-vs-3615",
+    "name": "VSOLE SOLAR ONGRID INVERTER Single Phase 3.6KW VS-3615",
+    "rate": 17491.00,
+    "unit": "NOS",
+    "category": "Inverters",
+    "phase": "1ph",
+    "mppt": "Single"
+  },
+  {
+    "id": "vsole-vs-4225",
+    "name": "VSOLE SOLAR ONGRID INVERTER Single Phase 4.0KW VS-4225",
+    "rate": 18800.00,
+    "unit": "NOS",
+    "category": "Inverters",
+    "phase": "1ph",
+    "mppt": "Single"
+  },
+  {
+    "id": "vsole-vs-422s",
+    "name": "VSOLE SOLAR ONGRID INVERTER Single Phase 4.7KW VS-422S",
+    "rate": 19800.00,
+    "unit": "NOS",
+    "category": "Inverters",
+    "phase": "1ph",
+    "mppt": "Single"
+  },
+  {
+    "id": "vsole-vs-5025",
+    "name": "VSOLE SOLAR ONGRID INVERTER Single Phase 5.0KW VS-5025",
+    "rate": 23500.00,
+    "unit": "NOS",
+    "category": "Inverters",
+    "phase": "1ph",
+    "mppt": "Single"
+  },
+  {
+    "id": "vsole-vs-5425",
+    "name": "VSOLE SOLAR ONGRID INVERTER Single Phase 5.4KW VS-5425",
+    "rate": 24500.00,
+    "unit": "NOS",
+    "category": "Inverters",
+    "phase": "1ph",
+    "mppt": "Single"
+  },
+  {
+    "id": "vsole-vs-602s",
+    "name": "VSOLE SOLAR ONGRID INVERTER Single Phase 6.0KW VS-602S",
+    "rate": 63000.00,
+    "unit": "NOS",
+    "category": "Inverters",
+    "phase": "1ph",
+    "mppt": "Single"
+  },
+  {
+    "id": "vsole-vs-4225t",
+    "name": "VSOLE SOLAR ONGRID INVERTER Three Phase 4.2KW VS-4225T",
+    "rate": 24000.00,
+    "unit": "NOS",
+    "category": "Inverters",
+    "phase": "3ph",
+    "mppt": "Dual"
+  },
+  {
+    "id": "vsole-vs-5025t",
+    "name": "VSOLE SOLAR ONGRID INVERTER Three Phase 5.0KW VS-5025T",
+    "rate": 26300.00,
+    "unit": "NOS",
+    "category": "Inverters",
+    "phase": "3ph",
+    "mppt": "Dual"
+  },
+  {
+    "id": "vsole-vs-5425t",
+    "name": "VSOLE SOLAR ONGRID INVERTER Three Phase 5.4KW VS-5425T",
+    "rate": 27300.00,
+    "unit": "NOS",
+    "category": "Inverters",
+    "phase": "3ph",
+    "mppt": "Dual"
+  },
+  {
+    "id": "vsole-vs-6025t",
+    "name": "VSOLE SOLAR ONGRID INVERTER Three Phase 6.0KW VS-6025T",
+    "rate": 27800.00,
+    "unit": "NOS",
+    "category": "Inverters",
+    "phase": "3ph",
+    "mppt": "Dual"
+  },
+  {
+    "id": "vsole-vs-5025s-3ph",
+    "name": "VSOLE SOLAR ONGRID INVERTER Three Phase 5.0KW VS-5025S",
+    "rate": 41500.00,
+    "unit": "NOS",
+    "category": "Inverters",
+    "phase": "3ph",
+    "mppt": "Dual"
+  },
+  {
+    "id": "vsole-vs-6025s-3ph",
+    "name": "VSOLE SOLAR ONGRID INVERTER Three Phase 6.0KW VS-6025S",
+    "rate": 42500.00,
+    "unit": "NOS",
+    "category": "Inverters",
+    "phase": "3ph",
+    "mppt": "Dual"
+  },
+  {
+    "id": "vsole-vs-0727t",
+    "name": "VSOLE SOLAR ONGRID INVERTER Three Phase 7.0KW VS-0727T",
+    "rate": 44000.00,
+    "unit": "NOS",
+    "category": "Inverters",
+    "phase": "3ph",
+    "mppt": "Single"
+  },
+  {
+    "id": "vsole-vs-0827t",
+    "name": "VSOLE SOLAR ONGRID INVERTER Three Phase 8.0KW VS-0827T",
+    "rate": 43683.00,
+    "unit": "NOS",
+    "category": "Inverters",
+    "phase": "3ph",
+    "mppt": "Single"
+  },
+  {
+    "id": "vsole-vs-1027t",
+    "name": "VSOLE SOLAR ONGRID INVERTER Three Phase 10.0KW VS-1027T",
+    "rate": 44346.00,
+    "unit": "NOS",
+    "category": "Inverters",
+    "phase": "3ph",
+    "mppt": "Single"
+  },
+  {
+    "id": "vsole-vs-1227t",
+    "name": "VSOLE SOLAR ONGRID INVERTER Three Phase 12.0KW VS-1227T",
+    "rate": 52147.00,
+    "unit": "NOS",
+    "category": "Inverters",
+    "phase": "3ph",
+    "mppt": "Dual"
+  },
+  {
+    "id": "vsole-vs-1527t",
+    "name": "VSOLE SOLAR ONGRID INVERTER Three Phase 15.0KW VS-1527T",
+    "rate": 58588.00,
+    "unit": "NOS",
+    "category": "Inverters",
+    "phase": "3ph",
+    "mppt": "Dual"
+  },
+  {
+    "id": "vsole-vs-1827t",
+    "name": "VSOLE SOLAR ONGRID INVERTER Three Phase 18.0KW VS-1827T",
+    "rate": 66271.00,
+    "unit": "NOS",
+    "category": "Inverters",
+    "phase": "3ph",
+    "mppt": "Dual"
+  },
+  {
+    "id": "vsole-vs-2027t",
+    "name": "VSOLE SOLAR ONGRID INVERTER Three Phase 20.0KW VS-2027T",
+    "rate": 69782.00,
+    "unit": "NOS",
+    "category": "Inverters",
+    "phase": "3ph",
+    "mppt": "Dual"
+  },
+  {
+    "id": "vsole-vs-2527t",
+    "name": "VSOLE SOLAR ONGRID INVERTER Three Phase 25.0KW VS-2527T",
+    "rate": 77358.00,
+    "unit": "NOS",
+    "category": "Inverters",
+    "phase": "3ph",
+    "mppt": "Dual"
+  },
+  {
+    "id": "vsole-vs-3027t",
+    "name": "VSOLE SOLAR ONGRID INVERTER Three Phase 30.0KW VS-3027T",
+    "rate": 98000.00,
+    "unit": "NOS",
+    "category": "Inverters",
+    "phase": "3ph",
+    "mppt": "Dual"
+  },
+  {
+    "id": "vsole-vs-3527t",
+    "name": "VSOLE SOLAR ONGRID INVERTER Three Phase 35.0KW VS-3527T",
+    "rate": 109726.00,
+    "unit": "NOS",
+    "category": "Inverters",
+    "phase": "3ph",
+    "mppt": "Dual"
+  },
+  {
+    "id": "vsole-vs-403t",
+    "name": "VSOLE SOLAR ONGRID INVERTER Three Phase 40.0KW VS-403T",
+    "rate": 142318.00,
+    "unit": "NOS",
+    "category": "Inverters",
+    "phase": "3ph",
+    "mppt": "Three"
+  },
+  {
+    "id": "vsole-vs-503t",
+    "name": "VSOLE SOLAR ONGRID INVERTER Three Phase 50.0KW VS-503T",
+    "rate": 150466.00,
+    "unit": "NOS",
+    "category": "Inverters",
+    "phase": "3ph",
+    "mppt": "Three"
+  },
+  {
+    "id": "vsole-vs-604t",
+    "name": "VSOLE SOLAR ONGRID INVERTER Three Phase 60.0KW VS-604T",
+    "rate": 168392.00,
+    "unit": "NOS",
+    "category": "Inverters",
+    "phase": "3ph",
+    "mppt": "Four"
+  },
+  {
+    "id": "vsole-vs-704t",
+    "name": "VSOLE SOLAR ONGRID INVERTER Three Phase 70.0KW VS-704T",
+    "rate": 186861.00,
+    "unit": "NOS",
+    "category": "Inverters",
+    "phase": "3ph",
+    "mppt": "Four"
+  },
+  {
+    "id": "vsole-vs-804t",
+    "name": "VSOLE SOLAR ONGRID INVERTER Three Phase 80.0KW VS-804T",
+    "rate": 218366.00,
+    "unit": "NOS",
+    "category": "Inverters",
+    "phase": "3ph",
+    "mppt": "Four"
+  },
+  {
+    "id": "vsole-vs-1004t",
+    "name": "VSOLE SOLAR ONGRID INVERTER Three Phase 100.0KW VS-1004T",
+    "rate": 247700.00,
+    "unit": "NOS",
+    "category": "Inverters",
+    "phase": "3ph",
+    "mppt": "Six"
+  },
+  {
+    "id": "vsole-vs-1106t",
+    "name": "VSOLE SOLAR ONGRID INVERTER Three Phase 110.0KW VS-1106T",
+    "rate": 259650.00,
+    "unit": "NOS",
+    "category": "Inverters",
+    "phase": "3ph",
+    "mppt": "Six"
+  },
+  {
+    "id": "vsole-vs-1206t",
+    "name": "VSOLE SOLAR ONGRID INVERTER Three Phase 120.0KW VS-1206T",
+    "rate": 281378.00,
+    "unit": "NOS",
+    "category": "Inverters",
+    "phase": "3ph",
+    "mppt": "Six"
+  },
+  {
+    "id": "vsole-vs-1256t",
+    "name": "VSOLE SOLAR ONGRID INVERTER Three Phase 125.0KW VS-1256T",
+    "rate": 292242.00,
+    "unit": "NOS",
+    "category": "Inverters",
+    "phase": "3ph",
+    "mppt": "Six"
+  },
+  {
+    "id": "vsole-vs-1308t",
+    "name": "VSOLE SOLAR ONGRID INVERTER Three Phase 135.0KW VS-1308T",
+    "rate": 313970.00,
+    "unit": "NOS",
+    "category": "Inverters",
+    "phase": "3ph",
+    "mppt": "Eight"
+  },
+  {
+    "id": "polycab-psisk50msmr12-5kw-1ph",
+    "name": "POLYCAB SOLAR GRID TIE INVERTER Single Phase PSISK50MSMR12 5.0KW",
+    "rate": 23400.00,
+    "unit": "NOS",
+    "category": "Inverters",
+    "phase": "1ph"
+  },
+  {
+    "id": "polycab-psit50ksm12r-5kw-3ph",
+    "name": "POLYCAB SOLAR GRID TIE INVERTER Three Phase PSIT50KSM12R 5.0KW",
+    "rate": 42065.00,
+    "unit": "NOS",
+    "category": "Inverters",
+    "phase": "3ph"
+  },
+  {
+    "id": "polycab-psis-sm26-6kw-1ph",
+    "name": "POLYCAB SOLAR GRID TIE INVERTER Single Phase PSIS-SM26 6.0KW",
+    "rate": 27750.00,
+    "unit": "NOS",
+    "category": "Inverters",
+    "phase": "1ph"
+  },
+  {
+    "id": "polycab-psisk35ms12-3.6kw-1ph",
+    "name": "POLYCAB SOLAR GRID TIE INVERTER Single Phase PSISK35MS12 3.6KW",
+    "rate": 14800.00,
+    "unit": "NOS",
+    "category": "Inverters",
+    "phase": "1ph"
+  },
+  {
+    "id": "polycab-psit10ksm12r-10kw-3ph",
+    "name": "POLYCAB SOLAR GRID TIE INVERTER Three Phase PSIT10KSM12R 10.0KW",
+    "rate": 43675.00,
+    "unit": "NOS",
+    "category": "Inverters",
+    "phase": "3ph"
+  }, 
+  {
     "id": "welding-rod",
     "name": "Welding Rod",
     "rate": 300.00,
@@ -545,4 +1175,6 @@
     "unit": "Fixed",
     "category": "Other"
   }
+ 
+
 ]

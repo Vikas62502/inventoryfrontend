@@ -18,6 +18,7 @@ export default function ProductModal({ product, onClose, onSave }: ProductModalP
   // Component for adding/editing products
   const [categories, setCategories] = useState<string[]>([])
   const [products, setProducts] = useState<Product[]>([])
+  const [referenceData, setReferenceData] = useState<any[]>([])
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const [imageFile, setImageFile] = useState<File | null>(null)
@@ -30,6 +31,38 @@ export default function ProductModal({ product, onClose, onSave }: ProductModalP
   const currentUser = authService.getUser()
   const isAgent = currentUser?.role === "agent"
 
+  // Unit mapping: reference unit -> display name
+  const unitDisplayMap: Record<string, string> = {
+    "NOS": "Quantity",
+    "PCS": "Pieces",
+    "MTR": "Meters",
+    "KGS": "Kilograms",
+    "W": "Watts",
+    "Fixed": "Fixed",
+    "PAC": "Pack",
+    "Pillar": "Pillar",
+  }
+
+  // Get available units based on selected product
+  const getAvailableUnits = (): string[] => {
+    if (!formData.name) {
+      // Return all available units
+      return Array.from(new Set(Object.values(unitDisplayMap)))
+    }
+    
+    // Find the product in reference data
+    const refProduct = referenceData.find((item: any) => item.name === formData.name)
+    if (refProduct && refProduct.unit) {
+      const unit = refProduct.unit
+      const displayName = unitDisplayMap[unit] || unit
+      // Return the mapped display name as primary option, plus all other units
+      return [displayName, ...Object.values(unitDisplayMap).filter(u => u !== displayName)]
+    }
+    
+    // Default: return all units
+    return Array.from(new Set(Object.values(unitDisplayMap)))
+  }
+
   const [formData, setFormData] = useState({
     name: product?.name || "",
     model: product?.model || "",
@@ -37,18 +70,24 @@ export default function ProductModal({ product, onClose, onSave }: ProductModalP
     price: product?.price || product?.unit_price || 0,
     quantity: product?.quantity || product?.central_stock || 0,
     category: product?.category || "",
+    unit: "",
     image: product?.image || "",
   })
+  
+  // For editing: track existing stock and new stock to add
+  const [existingStock, setExistingStock] = useState<number>(0)
+  const [stockToAdd, setStockToAdd] = useState<number>(0)
 
   useEffect(() => {
     const loadData = async () => {
       try {
         // Load reference data from JSON file
         const response = await fetch('/PRODUCT_CATALOG_REFERENCE.json')
-        const referenceData = await response.json()
+        const refData = await response.json()
+        setReferenceData(refData)
         
         // Extract unique categories from reference data
-        const referenceCategories: string[] = Array.from(new Set(referenceData.map((item: any) => item.category as string)))
+        const referenceCategories: string[] = Array.from(new Set(refData.map((item: any) => item.category as string)))
           .filter((cat): cat is string => typeof cat === 'string' && cat.trim() !== '')
         
         // Try to load categories from API, fallback to reference data
@@ -80,7 +119,7 @@ export default function ProductModal({ product, onClose, onSave }: ProductModalP
         }
         
         // Map reference data to Product format
-        const referenceProducts: Product[] = referenceData.map((item: any) => ({
+        const referenceProducts: Product[] = refData.map((item: any) => ({
           id: item.id,
           name: item.name,
           model: item.name, // Use name as model fallback
@@ -107,7 +146,23 @@ export default function ProductModal({ product, onClose, onSave }: ProductModalP
     if (product?.image) {
       setImagePreview(product.image)
     }
-  }, [product])
+    // If editing a product, set existing stock and try to find its unit from reference data
+    if (product) {
+      const currentStock = product.quantity || product.central_stock || 0
+      setExistingStock(currentStock)
+      setStockToAdd(0) // Reset stock to add when product changes
+    }
+    if (product?.name && referenceData.length > 0) {
+      const refProduct = referenceData.find((item: any) => item.name === product.name)
+      if (refProduct && refProduct.unit) {
+        const unitDisplay = unitDisplayMap[refProduct.unit] || refProduct.unit
+        setFormData(prev => ({
+          ...prev,
+          unit: unitDisplay,
+        }))
+      }
+    }
+  }, [product, referenceData])
 
   // Filter products based on selected category
   const filteredProducts = formData.category 
@@ -172,17 +227,25 @@ export default function ProductModal({ product, onClose, onSave }: ProductModalP
 
   const handleSelectProduct = (productName: string) => {
     const selectedProduct = filteredProducts.find(p => p.name === productName)
+    // Find product in reference data to get unit
+    const refProduct = referenceData.find((item: any) => item.name === productName)
+    
     if (selectedProduct) {
+      const unit = refProduct?.unit || ""
+      const unitDisplay = unit ? (unitDisplayMap[unit] || unit) : ""
+      
       setFormData(prev => ({
         ...prev,
         name: selectedProduct.name,
         model: selectedProduct.model || selectedProduct.name,
         wattage: selectedProduct.wattage || prev.wattage,
+        unit: unitDisplay,
       }))
     } else {
       setFormData(prev => ({
         ...prev,
-        name: productName
+        name: productName,
+        unit: refProduct?.unit ? (unitDisplayMap[refProduct.unit] || refProduct.unit) : "",
       }))
     }
     setShowProductDropdown(false)
@@ -208,6 +271,7 @@ export default function ProductModal({ product, onClose, onSave }: ProductModalP
       reader.readAsDataURL(file)
     }
   }
+
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault()
@@ -235,12 +299,25 @@ export default function ProductModal({ product, onClose, onSave }: ProductModalP
         }
       }
 
+      // Calculate final quantity: if editing and stockToAdd > 0, add to existing; otherwise use formData.quantity
+      let finalQuantity = formData.quantity || 0
+      if (product?.id && stockToAdd > 0) {
+        // When editing: add new stock to existing stock
+        finalQuantity = existingStock + stockToAdd
+      } else if (!product?.id) {
+        // When creating new product: use the quantity from form
+        finalQuantity = formData.quantity || 0
+      } else {
+        // When editing without adding stock: keep existing quantity
+        finalQuantity = existingStock
+      }
+
       const productData: any = {
         name: formData.name,
         model: formData.model,
         category: categoryName,
         wattage: formData.wattage || undefined,
-        quantity: formData.quantity || 0,
+        quantity: finalQuantity,
         image: imageFile || undefined,
       }
       
@@ -492,18 +569,108 @@ export default function ProductModal({ product, onClose, onSave }: ProductModalP
             />
           </div>
 
-          <div>
-            <label className="block text-sm font-medium text-slate-300 mb-2">Quantity *</label>
-            <input
-              type="number"
-              name="quantity"
-              value={formData.quantity}
-              onChange={handleChange}
-              className="w-full px-4 py-2 bg-slate-700 border border-slate-600 rounded-lg text-white placeholder-slate-500 focus:outline-none focus:border-blue-500"
-              min="0"
-              required
-            />
-          </div>
+          {product?.id ? (
+            // Edit mode: Show existing stock (read-only) and "Add Stock" field
+            <>
+              <div className="grid grid-cols-2 gap-3">
+                <div>
+                  <label className="block text-sm font-medium text-slate-300 mb-2">Current Stock</label>
+                  <input
+                    type="text"
+                    value={existingStock}
+                    disabled
+                    className="w-full px-4 py-2 bg-slate-800 border border-slate-600 rounded-lg text-slate-400 cursor-not-allowed"
+                    readOnly
+                  />
+                  <p className="text-xs text-slate-400 mt-1">Existing stock (cannot be changed)</p>
+                </div>
+                <div>
+                  <label className="block text-sm font-medium text-slate-300 mb-2">Unit *</label>
+                  <select
+                    name="unit"
+                    value={formData.unit}
+                    onChange={handleChange}
+                    className="w-full px-4 py-2 bg-slate-700 border border-slate-600 rounded-lg text-white focus:outline-none focus:border-blue-500"
+                    required
+                  >
+                    <option value="">Select Unit</option>
+                    {getAvailableUnits().map((unit, idx) => (
+                      <option key={`${unit}-${idx}`} value={unit}>
+                        {unit}
+                      </option>
+                    ))}
+                  </select>
+                </div>
+              </div>
+              <div>
+                <label className="block text-sm font-medium text-slate-300 mb-2">
+                  Add Stock
+                  <span className="text-xs text-slate-400 ml-2 font-normal">(New stock to add to existing)</span>
+                </label>
+                <input
+                  type="text"
+                  value={stockToAdd || ""}
+                  onChange={(e) => {
+                    const value = e.target.value
+                    // Allow empty, numbers, and decimal points
+                    if (value === "" || /^\d*\.?\d*$/.test(value)) {
+                      setStockToAdd(value === "" ? 0 : Number.parseFloat(value) || 0)
+                    }
+                  }}
+                  className="w-full px-4 py-2 bg-slate-700 border border-slate-600 rounded-lg text-white placeholder-slate-500 focus:outline-none focus:border-blue-500"
+                  placeholder="Enter quantity to add"
+                />
+                {stockToAdd > 0 && (
+                  <p className="text-xs text-emerald-400 mt-1">
+                    New total will be: {existingStock + stockToAdd} {formData.unit || ""}
+                  </p>
+                )}
+              </div>
+            </>
+          ) : (
+            // Create mode: Show regular quantity and unit fields
+            <div className="grid grid-cols-2 gap-3">
+              <div>
+                <label className="block text-sm font-medium text-slate-300 mb-2">Quantity *</label>
+                <input
+                  type="text"
+                  name="quantity"
+                  value={formData.quantity || ""}
+                  onChange={(e) => {
+                    const value = e.target.value
+                    // Allow empty, numbers, and decimal points
+                    if (value === "" || /^\d*\.?\d*$/.test(value)) {
+                      setFormData(prev => ({
+                        ...prev,
+                        quantity: value === "" ? 0 : Number.parseFloat(value) || 0,
+                      }))
+                    }
+                  }}
+                  className="w-full px-4 py-2 bg-slate-700 border border-slate-600 rounded-lg text-white placeholder-slate-500 focus:outline-none focus:border-blue-500"
+                  placeholder="Enter quantity"
+                  required
+                />
+              </div>
+              <div>
+                <label className="block text-sm font-medium text-slate-300 mb-2">Unit *</label>
+                <select
+                  name="unit"
+                  value={formData.unit}
+                  onChange={handleChange}
+                  className="w-full px-4 py-2 bg-slate-700 border border-slate-600 rounded-lg text-white focus:outline-none focus:border-blue-500"
+                  required
+                >
+                  <option value="">Select Unit</option>
+                  {getAvailableUnits().map((unit, idx) => (
+                    <option key={`${unit}-${idx}`} value={unit}>
+                      {unit}
+                    </option>
+                  ))}
+                </select>
+              </div>
+            </div>
+          )}
+
 
           {isAgent && (
             <div>

@@ -22,6 +22,7 @@ export default function SuperAdminManagerDashboard({ userName }: SuperAdminManag
   const [categoryFilter, setCategoryFilter] = useState<string | null>(null)
   const [categories, setCategories] = useState<string[]>([])
   const [isDeleting, setIsDeleting] = useState<string | null>(null)
+  const [referenceUnitsByName, setReferenceUnitsByName] = useState<Record<string, string>>({})
 
   // Load products
   const loadProducts = useCallback(async () => {
@@ -54,6 +55,26 @@ export default function SuperAdminManagerDashboard({ userName }: SuperAdminManag
       }
     }
     loadCategories()
+  }, [])
+
+  // Load product units from reference catalog (for displaying KGS/NOS/etc in UI)
+  useEffect(() => {
+    const loadReferenceUnits = async () => {
+      try {
+        const res = await fetch("/PRODUCT_CATALOG_REFERENCE.json")
+        const data = await res.json()
+        const map: Record<string, string> = {}
+        if (Array.isArray(data)) {
+          data.forEach((item: any) => {
+            if (item?.name && item?.unit) map[String(item.name)] = String(item.unit)
+          })
+        }
+        setReferenceUnitsByName(map)
+      } catch (err) {
+        console.warn("Failed to load PRODUCT_CATALOG_REFERENCE.json for unit display:", err)
+      }
+    }
+    loadReferenceUnits()
   }, [])
 
   const filteredProducts = products.filter((p) => {
@@ -114,6 +135,7 @@ export default function SuperAdminManagerDashboard({ userName }: SuperAdminManag
 
   // Use quantity or central_stock (API might return either)
   const getProductStock = (p: Product) => p.quantity ?? p.central_stock ?? p.total_stock ?? 0
+  const getProductUnit = (p: Product) => referenceUnitsByName[p.name] || ""
   const totalStock = products.reduce((sum, p) => sum + getProductStock(p), 0)
   const lowStockCount = products.filter(p => getProductStock(p) < 10).length
 
@@ -254,7 +276,7 @@ export default function SuperAdminManagerDashboard({ userName }: SuperAdminManag
                             getProductStock(product) < 10 ? "text-red-400" : "text-cyan-400"
                           }`}
                         >
-                          {getProductStock(product)}
+                          {getProductStock(product)}{getProductUnit(product) ? ` ${getProductUnit(product)}` : ""}
                         </span>
                       </td>
                       <td className="px-4 py-3">
@@ -304,7 +326,7 @@ export default function SuperAdminManagerDashboard({ userName }: SuperAdminManag
                           : "bg-cyan-500/20 text-cyan-400"
                       }`}
                     >
-                      {getProductStock(product)}
+                      {getProductStock(product)}{getProductUnit(product) ? ` ${getProductUnit(product)}` : ""}
                     </span>
                   </div>
                   <div className="grid grid-cols-2 gap-2 text-sm mb-3">
