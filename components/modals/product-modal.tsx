@@ -1,9 +1,10 @@
 "use client"
 
-import { useState, useEffect } from "react"
+import { useState, useEffect, useRef } from "react"
 import { Card } from "@/components/ui/card"
 import { Button } from "@/components/ui/button"
-import { X, Loader2, AlertCircle, Eye } from "lucide-react"
+import { X, Loader2, AlertCircle, Eye, Camera, CameraOff } from "lucide-react"
+import { Html5Qrcode } from "html5-qrcode"
 import { productsApi, categoriesApi, serialNumbersApi, type SerialNumber } from "@/lib/api"
 import type { Product } from "@/lib/api"
 import { authService } from "@/lib/auth"
@@ -83,6 +84,13 @@ export default function ProductModal({ product, onClose, onSave }: ProductModalP
   const [serialNumberInput, setSerialNumberInput] = useState<string>("")
   const [serialNumberMethod, setSerialNumberMethod] = useState<"manual" | "barcode" | "excel">("manual")
   const [serialNumberExcelFile, setSerialNumberExcelFile] = useState<File | null>(null)
+  
+  // Camera barcode scanning
+  const [isScanning, setIsScanning] = useState(false)
+  const [scanError, setScanError] = useState<string | null>(null)
+  const qrCodeScannerRef = useRef<Html5Qrcode | null>(null)
+  const scannerElementId = "barcode-scanner"
+  const scannerElementIdEdit = "barcode-scanner-edit"
   
   // Step tracking for new product creation
   const [currentStep, setCurrentStep] = useState<1 | 2>(1)
@@ -292,6 +300,85 @@ export default function ProductModal({ product, onClose, onSave }: ProductModalP
     }
     setShowProductDropdown(false)
   }
+
+  // Camera barcode scanning functions
+  const startCameraScanning = async () => {
+    try {
+      setScanError(null)
+      setIsScanning(true)
+      
+      // Use appropriate scanner element ID based on which one exists
+      let scannerId = scannerElementId
+      if (!document.getElementById(scannerElementId)) {
+        scannerId = scannerElementIdEdit
+      }
+      
+      // Wait a bit for the DOM element to be ready
+      await new Promise(resolve => setTimeout(resolve, 100))
+      
+      const html5QrCode = new Html5Qrcode(scannerId)
+      qrCodeScannerRef.current = html5QrCode
+      
+      await html5QrCode.start(
+        { facingMode: "environment" }, // Use back camera
+        {
+          fps: 10,
+          qrbox: { width: 250, height: 250 },
+          aspectRatio: 1.0,
+        },
+        (decodedText) => {
+          // Successfully scanned
+          const newSerial = decodedText.trim()
+          if (newSerial && !serialNumbers.includes(newSerial)) {
+            setSerialNumbers([...serialNumbers, newSerial])
+            setSerialNumberInput("")
+            // Optional: Stop scanning after successful scan, or continue scanning
+            // stopCameraScanning()
+          } else if (serialNumbers.includes(newSerial)) {
+            setError("Serial number already added")
+            setTimeout(() => setError(null), 3000)
+          }
+        },
+        (errorMessage) => {
+          // Ignore scanning errors (they're frequent during scanning)
+        }
+      )
+    } catch (err: any) {
+      console.error("Failed to start camera:", err)
+      setScanError(err.message || "Failed to access camera. Please check permissions.")
+      setIsScanning(false)
+    }
+  }
+
+  const stopCameraScanning = async () => {
+    try {
+      if (qrCodeScannerRef.current) {
+        await qrCodeScannerRef.current.stop()
+        await qrCodeScannerRef.current.clear()
+        qrCodeScannerRef.current = null
+      }
+      setIsScanning(false)
+      setScanError(null)
+    } catch (err) {
+      console.error("Error stopping camera:", err)
+      setIsScanning(false)
+    }
+  }
+
+  // Cleanup camera on unmount or method change
+  useEffect(() => {
+    return () => {
+      if (qrCodeScannerRef.current) {
+        stopCameraScanning()
+      }
+    }
+  }, [])
+
+  useEffect(() => {
+    if (serialNumberMethod !== "barcode" && isScanning) {
+      stopCameraScanning()
+    }
+  }, [serialNumberMethod])
 
   const handleImageChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0]
@@ -611,50 +698,103 @@ Example: SN001, SN002, SN003"
               
               {/* Barcode Scanner */}
               {serialNumberMethod === "barcode" && (
-                <div>
-                  <input
-                    type="text"
-                    value={serialNumberInput}
-                    onChange={(e) => setSerialNumberInput(e.target.value)}
-                    onKeyDown={(e) => {
-                      // When Enter is pressed, add the serial number
-                      if (e.key === "Enter" && serialNumberInput.trim()) {
-                        e.preventDefault()
-                        const newSerial = serialNumberInput.trim()
-                        if (!serialNumbers.includes(newSerial)) {
-                          setSerialNumbers([...serialNumbers, newSerial])
-                          setSerialNumberInput("")
-                        } else {
-                          setError("Serial number already added")
-                          setTimeout(() => setError(null), 3000)
-                        }
-                      }
-                    }}
-                    placeholder="Scan barcode or type serial number and press Enter"
-                    className="w-full px-4 py-2 bg-slate-700 border border-slate-600 rounded-lg text-white placeholder-slate-500 focus:outline-none focus:border-blue-500"
-                  />
-                  <p className="text-xs text-slate-400 mt-1">
-                    Scan barcode or type serial number and press Enter to add
-                  </p>
-                  {serialNumbers.length > 0 && (
-                    <div className="mt-2 flex flex-wrap gap-2">
-                      {serialNumbers.map((sn, idx) => (
-                        <span
-                          key={idx}
-                          className="px-2 py-1 bg-blue-600/20 text-blue-300 text-xs rounded border border-blue-500/50 flex items-center gap-1"
+                <div className="space-y-3">
+                  {/* Camera Scanner Section */}
+                  <div>
+                    <div className="flex items-center justify-between mb-2">
+                      <label className="block text-sm font-medium text-slate-300">
+                        Phone Camera Scanner
+                      </label>
+                      {!isScanning ? (
+                        <button
+                          type="button"
+                          onClick={startCameraScanning}
+                          className="flex items-center gap-2 px-3 py-1.5 bg-green-600 hover:bg-green-700 text-white rounded-lg transition text-sm"
                         >
-                          {sn}
-                          <button
-                            type="button"
-                            onClick={() => {
-                              setSerialNumbers(serialNumbers.filter((_, i) => i !== idx))
-                            }}
-                            className="text-blue-400 hover:text-blue-300"
+                          <Camera className="w-4 h-4" />
+                          Start Camera
+                        </button>
+                      ) : (
+                        <button
+                          type="button"
+                          onClick={stopCameraScanning}
+                          className="flex items-center gap-2 px-3 py-1.5 bg-red-600 hover:bg-red-700 text-white rounded-lg transition text-sm"
+                        >
+                          <CameraOff className="w-4 h-4" />
+                          Stop Camera
+                        </button>
+                      )}
+                    </div>
+                    
+                    {isScanning && (
+                      <div className="mb-3">
+                        <div id={scannerElementId} className="w-full max-w-md mx-auto rounded-lg overflow-hidden border border-slate-600"></div>
+                        {scanError && (
+                          <p className="text-xs text-red-400 mt-2">{scanError}</p>
+                        )}
+                        <p className="text-xs text-slate-400 mt-2 text-center">
+                          Point your camera at the barcode to scan
+                        </p>
+                      </div>
+                    )}
+                  </div>
+
+                  {/* Manual Input Section */}
+                  <div>
+                    <label className="block text-sm font-medium text-slate-300 mb-2">
+                      Or Type/Scan with External Scanner
+                    </label>
+                    <input
+                      type="text"
+                      value={serialNumberInput}
+                      onChange={(e) => setSerialNumberInput(e.target.value)}
+                      onKeyDown={(e) => {
+                        // When Enter is pressed, add the serial number
+                        if (e.key === "Enter" && serialNumberInput.trim()) {
+                          e.preventDefault()
+                          const newSerial = serialNumberInput.trim()
+                          if (!serialNumbers.includes(newSerial)) {
+                            setSerialNumbers([...serialNumbers, newSerial])
+                            setSerialNumberInput("")
+                          } else {
+                            setError("Serial number already added")
+                            setTimeout(() => setError(null), 3000)
+                          }
+                        }
+                      }}
+                      placeholder="Type serial number or scan with external scanner and press Enter"
+                      className="w-full px-4 py-2 bg-slate-700 border border-slate-600 rounded-lg text-white placeholder-slate-500 focus:outline-none focus:border-blue-500"
+                    />
+                    <p className="text-xs text-slate-400 mt-1">
+                      Type serial number or scan with external barcode scanner and press Enter to add
+                    </p>
+                  </div>
+
+                  {/* Scanned Serial Numbers Display */}
+                  {serialNumbers.length > 0 && (
+                    <div className="mt-2">
+                      <p className="text-xs text-slate-400 mb-2">
+                        Scanned: {serialNumbers.length} of {formData.quantity || stockToAdd || 0}
+                      </p>
+                      <div className="flex flex-wrap gap-2">
+                        {serialNumbers.map((sn, idx) => (
+                          <span
+                            key={idx}
+                            className="px-2 py-1 bg-blue-600/20 text-blue-300 text-xs rounded border border-blue-500/50 flex items-center gap-1"
                           >
-                            <X className="w-3 h-3" />
-                          </button>
-                        </span>
-                      ))}
+                            {sn}
+                            <button
+                              type="button"
+                              onClick={() => {
+                                setSerialNumbers(serialNumbers.filter((_, i) => i !== idx))
+                              }}
+                              className="text-blue-400 hover:text-blue-300"
+                            >
+                              <X className="w-3 h-3" />
+                            </button>
+                          </span>
+                        ))}
+                      </div>
                     </div>
                   )}
                 </div>
@@ -1015,9 +1155,10 @@ Example: SN001, SN002, SN003"
                       if (newStockToAdd !== stockToAdd) {
                         setSerialNumbers([])
                         setSerialNumberInput("")
-                        setSerialNumberImage(null)
-                        setSerialNumberImagePreview(null)
                         setSerialNumberExcelFile(null)
+                        if (isScanning) {
+                          stopCameraScanning()
+                        }
                       }
                     }
                   }}
@@ -1116,50 +1257,103 @@ Example: SN001, SN002, SN003"
                   
                   {/* Barcode Scanner */}
                   {serialNumberMethod === "barcode" && (
-                    <div>
-                      <input
-                        type="text"
-                        value={serialNumberInput}
-                        onChange={(e) => setSerialNumberInput(e.target.value)}
-                        onKeyDown={(e) => {
-                          // When Enter is pressed, add the serial number
-                          if (e.key === "Enter" && serialNumberInput.trim()) {
-                            e.preventDefault()
-                            const newSerial = serialNumberInput.trim()
-                            if (!serialNumbers.includes(newSerial)) {
-                              setSerialNumbers([...serialNumbers, newSerial])
-                              setSerialNumberInput("")
-                            } else {
-                              setError("Serial number already added")
-                              setTimeout(() => setError(null), 3000)
-                            }
-                          }
-                        }}
-                        placeholder="Scan barcode or type serial number and press Enter"
-                        className="w-full px-4 py-2 bg-slate-700 border border-slate-600 rounded-lg text-white placeholder-slate-500 focus:outline-none focus:border-blue-500"
-                      />
-                      <p className="text-xs text-slate-400 mt-1">
-                        Scan barcode or type serial number and press Enter to add
-                      </p>
-                      {serialNumbers.length > 0 && (
-                        <div className="mt-2 flex flex-wrap gap-2">
-                          {serialNumbers.map((sn, idx) => (
-                            <span
-                              key={idx}
-                              className="px-2 py-1 bg-blue-600/20 text-blue-300 text-xs rounded border border-blue-500/50 flex items-center gap-1"
+                    <div className="space-y-3">
+                      {/* Camera Scanner Section */}
+                      <div>
+                        <div className="flex items-center justify-between mb-2">
+                          <label className="block text-sm font-medium text-slate-300">
+                            Phone Camera Scanner
+                          </label>
+                          {!isScanning ? (
+                            <button
+                              type="button"
+                              onClick={startCameraScanning}
+                              className="flex items-center gap-2 px-3 py-1.5 bg-green-600 hover:bg-green-700 text-white rounded-lg transition text-sm"
                             >
-                              {sn}
-                              <button
-                                type="button"
-                                onClick={() => {
-                                  setSerialNumbers(serialNumbers.filter((_, i) => i !== idx))
-                                }}
-                                className="text-blue-400 hover:text-blue-300"
+                              <Camera className="w-4 h-4" />
+                              Start Camera
+                            </button>
+                          ) : (
+                            <button
+                              type="button"
+                              onClick={stopCameraScanning}
+                              className="flex items-center gap-2 px-3 py-1.5 bg-red-600 hover:bg-red-700 text-white rounded-lg transition text-sm"
+                            >
+                              <CameraOff className="w-4 h-4" />
+                              Stop Camera
+                            </button>
+                          )}
+                        </div>
+                        
+                        {isScanning && (
+                          <div className="mb-3">
+                            <div id={`${scannerElementId}-edit`} className="w-full max-w-md mx-auto rounded-lg overflow-hidden border border-slate-600"></div>
+                            {scanError && (
+                              <p className="text-xs text-red-400 mt-2">{scanError}</p>
+                            )}
+                            <p className="text-xs text-slate-400 mt-2 text-center">
+                              Point your camera at the barcode to scan
+                            </p>
+                          </div>
+                        )}
+                      </div>
+
+                      {/* Manual Input Section */}
+                      <div>
+                        <label className="block text-sm font-medium text-slate-300 mb-2">
+                          Or Type/Scan with External Scanner
+                        </label>
+                        <input
+                          type="text"
+                          value={serialNumberInput}
+                          onChange={(e) => setSerialNumberInput(e.target.value)}
+                          onKeyDown={(e) => {
+                            // When Enter is pressed, add the serial number
+                            if (e.key === "Enter" && serialNumberInput.trim()) {
+                              e.preventDefault()
+                              const newSerial = serialNumberInput.trim()
+                              if (!serialNumbers.includes(newSerial)) {
+                                setSerialNumbers([...serialNumbers, newSerial])
+                                setSerialNumberInput("")
+                              } else {
+                                setError("Serial number already added")
+                                setTimeout(() => setError(null), 3000)
+                              }
+                            }
+                          }}
+                          placeholder="Type serial number or scan with external scanner and press Enter"
+                          className="w-full px-4 py-2 bg-slate-700 border border-slate-600 rounded-lg text-white placeholder-slate-500 focus:outline-none focus:border-blue-500"
+                        />
+                        <p className="text-xs text-slate-400 mt-1">
+                          Type serial number or scan with external barcode scanner and press Enter to add
+                        </p>
+                      </div>
+
+                      {/* Scanned Serial Numbers Display */}
+                      {serialNumbers.length > 0 && (
+                        <div className="mt-2">
+                          <p className="text-xs text-slate-400 mb-2">
+                            Scanned: {serialNumbers.length} of {stockToAdd || 0}
+                          </p>
+                          <div className="flex flex-wrap gap-2">
+                            {serialNumbers.map((sn, idx) => (
+                              <span
+                                key={idx}
+                                className="px-2 py-1 bg-blue-600/20 text-blue-300 text-xs rounded border border-blue-500/50 flex items-center gap-1"
                               >
-                                <X className="w-3 h-3" />
-                              </button>
-                            </span>
-                          ))}
+                                {sn}
+                                <button
+                                  type="button"
+                                  onClick={() => {
+                                    setSerialNumbers(serialNumbers.filter((_, i) => i !== idx))
+                                  }}
+                                  className="text-blue-400 hover:text-blue-300"
+                                >
+                                  <X className="w-3 h-3" />
+                                </button>
+                              </span>
+                            ))}
+                          </div>
                         </div>
                       )}
                     </div>
