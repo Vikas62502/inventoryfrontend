@@ -307,24 +307,81 @@ export default function ProductModal({ product, onClose, onSave }: ProductModalP
       setScanError(null)
       setIsScanning(true)
       
+      // Check if we're in a secure context (HTTPS or localhost)
+      const isSecureContext = window.isSecureContext || 
+        window.location.protocol === "https:" || 
+        window.location.hostname === "localhost" || 
+        window.location.hostname === "127.0.0.1"
+      
+      if (!isSecureContext) {
+        throw new Error("Camera requires HTTPS connection. Please use HTTPS or localhost.")
+      }
+      
+      // Check if getUserMedia is available
+      if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
+        throw new Error("Camera API not supported in this browser. Please use a modern browser like Chrome, Firefox, or Safari.")
+      }
+      
       // Use appropriate scanner element ID based on which one exists
       let scannerId = scannerElementId
       if (!document.getElementById(scannerElementId)) {
         scannerId = scannerElementIdEdit
       }
       
+      // Check if element exists
+      const scannerElement = document.getElementById(scannerId)
+      if (!scannerElement) {
+        throw new Error("Scanner element not found. Please try again.")
+      }
+      
       // Wait a bit for the DOM element to be ready
-      await new Promise(resolve => setTimeout(resolve, 100))
+      await new Promise(resolve => setTimeout(resolve, 300))
+      
+      // Check camera permissions first
+      try {
+        const stream = await navigator.mediaDevices.getUserMedia({ 
+          video: { facingMode: "environment" } 
+        })
+        // Stop the test stream immediately
+        stream.getTracks().forEach(track => track.stop())
+      } catch (permErr: any) {
+        if (permErr.name === "NotAllowedError" || permErr.name === "PermissionDeniedError") {
+          throw new Error("Camera permission denied. Please allow camera access in your browser settings.")
+        } else if (permErr.name === "NotFoundError" || permErr.name === "DevicesNotFoundError") {
+          throw new Error("No camera found. Please connect a camera device.")
+        } else if (permErr.name === "NotReadableError" || permErr.name === "TrackStartError") {
+          throw new Error("Camera is already in use by another application.")
+        } else {
+          throw new Error(`Camera access error: ${permErr.message || "Unknown error"}`)
+        }
+      }
       
       const html5QrCode = new Html5Qrcode(scannerId)
       qrCodeScannerRef.current = html5QrCode
       
+      // Try to get available cameras
+      const cameras = await Html5Qrcode.getCameras()
+      if (cameras.length === 0) {
+        throw new Error("No cameras found on this device.")
+      }
+      
+      // Try to find back camera first, fallback to any camera
+      let cameraId: string | null = null
+      const backCamera = cameras.find(cam => cam.label.toLowerCase().includes("back") || cam.label.toLowerCase().includes("rear"))
+      if (backCamera) {
+        cameraId = backCamera.id
+      } else {
+        // Try environment facing mode, or use first available camera
+        cameraId = cameras[0].id
+      }
+      
       await html5QrCode.start(
-        { facingMode: "environment" }, // Use back camera
+        cameraId || { facingMode: "environment" },
         {
           fps: 10,
           qrbox: { width: 250, height: 250 },
           aspectRatio: 1.0,
+          disableFlip: false,
         },
         (decodedText) => {
           // Successfully scanned
@@ -341,20 +398,59 @@ export default function ProductModal({ product, onClose, onSave }: ProductModalP
         },
         (errorMessage) => {
           // Ignore scanning errors (they're frequent during scanning)
+          // Only log if it's not a common scanning error
+          if (!errorMessage.includes("NotFoundException") && !errorMessage.includes("No MultiFormat Readers")) {
+            console.debug("Scanning error:", errorMessage)
+          }
         }
       )
     } catch (err: any) {
       console.error("Failed to start camera:", err)
-      setScanError(err.message || "Failed to access camera. Please check permissions.")
+      let errorMessage = "Failed to access camera."
+      
+      if (err.message) {
+        errorMessage = err.message
+      } else if (err.name === "NotAllowedError" || err.name === "PermissionDeniedError") {
+        errorMessage = "Camera permission denied. Please allow camera access in your browser settings."
+      } else if (err.name === "NotFoundError" || err.name === "DevicesNotFoundError") {
+        errorMessage = "No camera found. Please connect a camera device."
+      } else if (err.name === "NotReadableError") {
+        errorMessage = "Camera is already in use by another application."
+      } else if (err.message?.includes("HTTPS") || err.message?.includes("secure context")) {
+        errorMessage = "Camera requires HTTPS connection. Please use HTTPS or localhost."
+      }
+      
+      setScanError(errorMessage)
       setIsScanning(false)
+      
+      // Clean up any partial initialization
+      if (qrCodeScannerRef.current) {
+        try {
+          await qrCodeScannerRef.current.stop()
+          await qrCodeScannerRef.current.clear()
+        } catch (cleanupErr) {
+          // Ignore cleanup errors
+        }
+        qrCodeScannerRef.current = null
+      }
     }
   }
 
   const stopCameraScanning = async () => {
     try {
       if (qrCodeScannerRef.current) {
-        await qrCodeScannerRef.current.stop()
-        await qrCodeScannerRef.current.clear()
+        try {
+          await qrCodeScannerRef.current.stop()
+        } catch (stopErr) {
+          // Ignore stop errors (camera might already be stopped)
+          console.debug("Error stopping scanner:", stopErr)
+        }
+        try {
+          await qrCodeScannerRef.current.clear()
+        } catch (clearErr) {
+          // Ignore clear errors
+          console.debug("Error clearing scanner:", clearErr)
+        }
         qrCodeScannerRef.current = null
       }
       setIsScanning(false)
@@ -362,6 +458,8 @@ export default function ProductModal({ product, onClose, onSave }: ProductModalP
     } catch (err) {
       console.error("Error stopping camera:", err)
       setIsScanning(false)
+      // Force cleanup even if there's an error
+      qrCodeScannerRef.current = null
     }
   }
 
@@ -728,13 +826,27 @@ Example: SN001, SN002, SN003"
                     
                     {isScanning && (
                       <div className="mb-3">
-                        <div id={scannerElementId} className="w-full max-w-md mx-auto rounded-lg overflow-hidden border border-slate-600"></div>
+                        <div 
+                          id={scannerElementId} 
+                          className="w-full max-w-md mx-auto rounded-lg overflow-hidden border border-slate-600 bg-black"
+                          style={{ minHeight: "250px" }}
+                        ></div>
                         {scanError && (
-                          <p className="text-xs text-red-400 mt-2">{scanError}</p>
+                          <div className="mt-2 p-2 bg-red-900/20 border border-red-500/50 rounded text-xs text-red-400">
+                            <p className="font-medium">Camera Error:</p>
+                            <p>{scanError}</p>
+                            <p className="mt-1 text-red-300">
+                              {scanError.includes("permission") && "Go to browser settings → Site settings → Camera → Allow"}
+                              {scanError.includes("HTTPS") && "Please access this page via HTTPS or localhost"}
+                              {scanError.includes("in use") && "Close other applications using the camera"}
+                            </p>
+                          </div>
                         )}
-                        <p className="text-xs text-slate-400 mt-2 text-center">
-                          Point your camera at the barcode to scan
-                        </p>
+                        {!scanError && (
+                          <p className="text-xs text-slate-400 mt-2 text-center">
+                            Point your camera at the barcode to scan
+                          </p>
+                        )}
                       </div>
                     )}
                   </div>
@@ -1287,13 +1399,27 @@ Example: SN001, SN002, SN003"
                         
                         {isScanning && (
                           <div className="mb-3">
-                            <div id={`${scannerElementId}-edit`} className="w-full max-w-md mx-auto rounded-lg overflow-hidden border border-slate-600"></div>
+                            <div 
+                              id={scannerElementIdEdit} 
+                              className="w-full max-w-md mx-auto rounded-lg overflow-hidden border border-slate-600 bg-black"
+                              style={{ minHeight: "250px" }}
+                            ></div>
                             {scanError && (
-                              <p className="text-xs text-red-400 mt-2">{scanError}</p>
+                              <div className="mt-2 p-2 bg-red-900/20 border border-red-500/50 rounded text-xs text-red-400">
+                                <p className="font-medium">Camera Error:</p>
+                                <p>{scanError}</p>
+                                <p className="mt-1 text-red-300">
+                                  {scanError.includes("permission") && "Go to browser settings → Site settings → Camera → Allow"}
+                                  {scanError.includes("HTTPS") && "Please access this page via HTTPS or localhost"}
+                                  {scanError.includes("in use") && "Close other applications using the camera"}
+                                </p>
+                              </div>
                             )}
-                            <p className="text-xs text-slate-400 mt-2 text-center">
-                              Point your camera at the barcode to scan
-                            </p>
+                            {!scanError && (
+                              <p className="text-xs text-slate-400 mt-2 text-center">
+                                Point your camera at the barcode to scan
+                              </p>
+                            )}
                           </div>
                         )}
                       </div>
