@@ -141,18 +141,39 @@ export const productsApi = {
 
   async update(
     id: string,
-    updates: Partial<Omit<Product, "id">> & { image?: File }
+    updates: Partial<Omit<Product, "id">> & { 
+      image?: File
+      serial_numbers?: string[]
+      stock_to_add?: number
+    }
   ): Promise<Product> {
-    if (updates.image) {
+    // Use FormData if we have image, serial_numbers, or stock_to_add
+    if (updates.image || updates.serial_numbers || updates.stock_to_add !== undefined) {
       const formData = new FormData()
+      
+      // Handle image file
+      if (updates.image) {
+        formData.append("image", updates.image)
+      }
+      
+      // Handle serial_numbers as JSON string array (backend requirement)
+      if (updates.serial_numbers && Array.isArray(updates.serial_numbers)) {
+        formData.append("serial_numbers", JSON.stringify(updates.serial_numbers))
+      }
+      
+      // Handle stock_to_add (backend expects as string)
+      if (updates.stock_to_add !== undefined) {
+        formData.append("stock_to_add", updates.stock_to_add.toString())
+      }
+      
+      // Handle other fields
       Object.keys(updates).forEach((key) => {
         const value = updates[key as keyof typeof updates]
-        if (key === "image" && value instanceof File) {
-          formData.append(key, value)
-        } else if (value !== undefined && key !== "image") {
+        if (key !== "image" && key !== "serial_numbers" && key !== "stock_to_add" && value !== undefined) {
           formData.append(key, typeof value === "object" ? JSON.stringify(value) : String(value))
         }
       })
+      
       return apiClient.put<Product>(`/products/${id}`, formData, true)
     }
     return apiClient.put<Product>(`/products/${id}`, updates)
@@ -160,6 +181,39 @@ export const productsApi = {
 
   async delete(id: string): Promise<void> {
     return apiClient.delete<void>(`/products/${id}`)
+  },
+}
+
+// Serial Numbers API
+export interface SerialNumber {
+  id: string
+  product_id: string
+  serial_number: string
+  created_at?: string
+  updated_at?: string
+}
+
+export interface SerialNumberSearchResult {
+  serial_number: string
+  product: {
+    id: string
+    name: string
+    model: string
+  }
+  created_at?: string
+}
+
+export const serialNumbersApi = {
+  async getByProduct(productId: string): Promise<SerialNumber[]> {
+    return apiClient.get<SerialNumber[]>(`/products/${productId}/serial-numbers`)
+  },
+
+  async search(query: string): Promise<SerialNumberSearchResult | null> {
+    return apiClient.get<SerialNumberSearchResult | null>(`/serial-numbers/search`, { q: query })
+  },
+
+  async delete(serialNumberId: string): Promise<void> {
+    return apiClient.delete<void>(`/serial-numbers/${serialNumberId}`)
   },
 }
 
@@ -269,6 +323,7 @@ export const stockRequestsApi = {
     data?: {
       rejection_reason?: string
       dispatch_image?: File
+      serial_number_ranges?: Record<string, { from: string; to: string }>
     }
   ): Promise<StockRequest> {
     if (data?.dispatch_image) {
@@ -277,9 +332,18 @@ export const stockRequestsApi = {
         formData.append("rejection_reason", data.rejection_reason)
       }
       formData.append("dispatch_image", data.dispatch_image)
+      if (data.serial_number_ranges) {
+        formData.append("serial_number_ranges", JSON.stringify(data.serial_number_ranges))
+      }
       return apiClient.post<StockRequest>(`/stock-requests/${id}/dispatch`, formData, true)
     }
-    const body = data?.rejection_reason ? { rejection_reason: data.rejection_reason } : {}
+    const body: any = {}
+    if (data?.rejection_reason) {
+      body.rejection_reason = data.rejection_reason
+    }
+    if (data?.serial_number_ranges) {
+      body.serial_number_ranges = data.serial_number_ranges
+    }
     return apiClient.post<StockRequest>(`/stock-requests/${id}/dispatch`, body)
   },
 

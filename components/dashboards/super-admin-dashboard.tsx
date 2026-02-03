@@ -556,8 +556,8 @@ export default function SuperAdminDashboard({ userName }: SuperAdminDashboardPro
                 className="w-full sm:w-auto px-4 py-2 bg-slate-700 border border-slate-600 rounded-lg text-white focus:outline-none focus:border-blue-500"
               >
                 <option value="">All Categories</option>
-                {categories.map((cat) => (
-                  <option key={cat} value={cat}>
+                {categories.map((cat, index) => (
+                  <option key={`${cat}-${index}`} value={cat}>
                     {cat}
                   </option>
                 ))}

@@ -5,7 +5,7 @@ import { Card } from "@/components/ui/card"
 import { Button } from "@/components/ui/button"
 import { X, CheckCircle, XCircle, Upload, Image as ImageIcon, Loader2, AlertCircle } from "lucide-react"
 import type { StockRequest, AdminInventory } from "@/lib/api"
-import { stockRequestsApi, productsApi, adminInventoryApi, type Product } from "@/lib/api"
+import { stockRequestsApi, productsApi, adminInventoryApi, serialNumbersApi, type Product } from "@/lib/api"
 import { formatImageUrl, formatDateISO } from "@/lib/utils"
 import { authService } from "@/lib/auth"
 
@@ -35,6 +35,12 @@ export default function EnhancedRequestApprovalModal({
   const [editedQuantities, setEditedQuantities] = useState<Record<number, number>>({})
   // Admin inventory - map of product_id to quantity
   const [adminInventory, setAdminInventory] = useState<Record<string, number>>({})
+  // Serial number ranges - map of item index to { from: string, to: string }
+  const [serialNumberRanges, setSerialNumberRanges] = useState<Record<number, { from: string; to: string }>>({})
+  // Current user to check if super admin
+  const [currentUser, setCurrentUser] = useState<any>(null)
+  // Available serial numbers for each product - map of product_id to SerialNumber[]
+  const [availableSerialNumbers, setAvailableSerialNumbers] = useState<Record<string, any[]>>({})
 
   // Fetch full request details and products
   useEffect(() => {
@@ -62,6 +68,7 @@ export default function EnhancedRequestApprovalModal({
 
         // Fetch current admin's inventory
         const currentAdmin = authService.getUser()
+        setCurrentUser(currentAdmin)
         if (currentAdmin?.id) {
           try {
             const adminInv = await adminInventoryApi.getByAdmin(currentAdmin.id)
@@ -74,6 +81,21 @@ export default function EnhancedRequestApprovalModal({
             console.error("Failed to load admin inventory:", invErr)
             setAdminInventory({})
           }
+        }
+        
+        // If super admin, fetch available serial numbers for each product
+        if (currentAdmin?.role === "super-admin" && fullRequestData.items) {
+          const serialNumbersMap: Record<string, any[]> = {}
+          for (const item of fullRequestData.items) {
+            try {
+              const serials = await serialNumbersApi.getByProduct(item.product_id)
+              serialNumbersMap[item.product_id] = serials
+            } catch (err) {
+              console.error(`Failed to load serial numbers for product ${item.product_id}:`, err)
+              serialNumbersMap[item.product_id] = []
+            }
+          }
+          setAvailableSerialNumbers(serialNumbersMap)
         }
       } catch (err) {
         console.error("Failed to load request details:", err)
@@ -149,9 +171,22 @@ export default function EnhancedRequestApprovalModal({
         })
       }
 
+      // Prepare serial number ranges for dispatch (if super admin and ranges are provided)
+      const serialNumberRangesData: Record<string, { from: string; to: string }> | undefined = 
+        currentUser?.role === "super-admin" && Object.keys(serialNumberRanges).length > 0
+          ? Object.entries(serialNumberRanges).reduce((acc, [index, range]) => {
+              const item = fullRequest.items?.[parseInt(index)]
+              if (item && range.from && range.to) {
+                acc[item.product_id] = range
+              }
+              return acc
+            }, {} as Record<string, { from: string; to: string }>)
+          : undefined
+
       // Dispatch the request
       await stockRequestsApi.dispatch(request.id, {
         dispatch_image: dispatchImage || undefined,
+        serial_number_ranges: serialNumberRangesData,
       })
       onApprove()
       onClose()
@@ -227,33 +262,81 @@ export default function EnhancedRequestApprovalModal({
                       const editedQuantity = editedQuantities[index] ?? originalQuantity
                       const isModified = editedQuantity !== originalQuantity
                       
+                      const serialRange = serialNumberRanges[index] || { from: "", to: "" }
+                      const availableSerials = availableSerialNumbers[item.product_id] || []
+                      const isSuperAdmin = currentUser?.role === "super-admin"
+                      
                       return (
-                        <div key={index} className="flex justify-between items-center p-2 bg-slate-600/50 rounded gap-3">
-                          <div className="flex-1 min-w-0">
-                            <p className="text-white font-medium">
-                              {productName} {productModel && `- ${productModel}`}
-                            </p>
-                            <p className="text-slate-400 text-xs mt-1">My Stock: {adminStock} units</p>
-                            {isModified && (
-                              <p className="text-amber-400 text-xs mt-1">
-                                Original: {originalQuantity} units
+                        <div key={index} className="p-3 bg-slate-600/50 rounded gap-3 space-y-3">
+                          <div className="flex justify-between items-center">
+                            <div className="flex-1 min-w-0">
+                              <p className="text-white font-medium">
+                                {productName} {productModel && `- ${productModel}`}
                               </p>
-                            )}
+                              <p className="text-slate-400 text-xs mt-1">My Stock: {adminStock} units</p>
+                              {isModified && (
+                                <p className="text-amber-400 text-xs mt-1">
+                                  Original: {originalQuantity} units
+                                </p>
+                              )}
+                            </div>
+                            <div className="flex items-center gap-2 flex-shrink-0">
+                              <input
+                                type="number"
+                                min="1"
+                                max={originalQuantity}
+                                value={editedQuantity}
+                                onChange={(e) => {
+                                  const newQty = parseInt(e.target.value) || 0
+                                  handleQuantityChange(index, newQty, originalQuantity)
+                                }}
+                                className="w-20 px-2 py-1 bg-slate-700 border border-slate-600 rounded text-white text-center focus:outline-none focus:border-cyan-500 font-semibold"
+                              />
+                              <span className="text-cyan-400 font-bold whitespace-nowrap">units</span>
+                            </div>
                           </div>
-                          <div className="flex items-center gap-2 flex-shrink-0">
-                            <input
-                              type="number"
-                              min="1"
-                              max={originalQuantity}
-                              value={editedQuantity}
-                              onChange={(e) => {
-                                const newQty = parseInt(e.target.value) || 0
-                                handleQuantityChange(index, newQty, originalQuantity)
-                              }}
-                              className="w-20 px-2 py-1 bg-slate-700 border border-slate-600 rounded text-white text-center focus:outline-none focus:border-cyan-500 font-semibold"
-                            />
-                            <span className="text-cyan-400 font-bold whitespace-nowrap">units</span>
-                          </div>
+                          
+                          {/* Serial Number Range Selection - Only for Super Admin */}
+                          {isSuperAdmin && availableSerials.length > 0 && (
+                            <div className="pt-2 border-t border-slate-700 space-y-2">
+                              <p className="text-xs text-slate-400 font-medium">Serial Number Range (Optional)</p>
+                              <div className="grid grid-cols-2 gap-2">
+                                <div>
+                                  <label className="block text-xs text-slate-400 mb-1">From</label>
+                                  <input
+                                    type="text"
+                                    value={serialRange.from}
+                                    onChange={(e) => {
+                                      setSerialNumberRanges(prev => ({
+                                        ...prev,
+                                        [index]: { ...(prev[index] || { from: "", to: "" }), from: e.target.value }
+                                      }))
+                                    }}
+                                    placeholder="e.g., SN001"
+                                    className="w-full px-2 py-1.5 bg-slate-700 border border-slate-600 rounded text-white text-sm focus:outline-none focus:border-cyan-500"
+                                  />
+                                </div>
+                                <div>
+                                  <label className="block text-xs text-slate-400 mb-1">To</label>
+                                  <input
+                                    type="text"
+                                    value={serialRange.to}
+                                    onChange={(e) => {
+                                      setSerialNumberRanges(prev => ({
+                                        ...prev,
+                                        [index]: { ...(prev[index] || { from: "", to: "" }), to: e.target.value }
+                                      }))
+                                    }}
+                                    placeholder="e.g., SN008"
+                                    className="w-full px-2 py-1.5 bg-slate-700 border border-slate-600 rounded text-white text-sm focus:outline-none focus:border-cyan-500"
+                                  />
+                                </div>
+                              </div>
+                              <p className="text-xs text-slate-500">
+                                Available: {availableSerials.length} serial numbers. Leave empty to transfer without specific serial numbers.
+                              </p>
+                            </div>
+                          )}
                         </div>
                       )
                     }) || []
