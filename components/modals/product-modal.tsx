@@ -422,17 +422,27 @@ export default function ProductModal({ product, onClose, onSave }: ProductModalP
           aspectRatio: 1.0,
           disableFlip: false,
         },
-        (decodedText) => {
+        async (decodedText) => {
           // Successfully scanned
           const newSerial = decodedText.trim()
           if (newSerial && !serialNumbers.includes(newSerial)) {
             setSerialNumbers([...serialNumbers, newSerial])
             setSerialNumberInput("")
-            // Optional: Stop scanning after successful scan, or continue scanning
-            // stopCameraScanning()
+            // Stop scanning after successful scan
+            try {
+              await stopCameraScanning()
+            } catch (err) {
+              console.error("Error stopping camera after scan:", err)
+            }
           } else if (serialNumbers.includes(newSerial)) {
             setError("Serial number already added")
             setTimeout(() => setError(null), 3000)
+            // Stop scanning if duplicate detected
+            try {
+              await stopCameraScanning()
+            } catch (err) {
+              console.error("Error stopping camera after duplicate:", err)
+            }
           }
         },
         (errorMessage) => {
