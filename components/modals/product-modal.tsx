@@ -304,6 +304,7 @@ export default function ProductModal({ product, onClose, onSave }: ProductModalP
   // Camera barcode scanning functions
   const startCameraScanning = async () => {
     try {
+      console.log("startCameraScanning called")
       setScanError(null)
       setIsScanning(true)
       
@@ -311,12 +312,16 @@ export default function ProductModal({ product, onClose, onSave }: ProductModalP
       const isMobile = /Android|webOS|iPhone|iPad|iPod|BlackBerry|IEMobile|Opera Mini/i.test(navigator.userAgent) ||
         (window.innerWidth <= 768)
       
+      console.log("Is mobile:", isMobile)
+      
       // Check if we're in a secure context (HTTPS or localhost)
       const isSecureContext = window.isSecureContext || 
         window.location.protocol === "https:" || 
         window.location.hostname === "localhost" || 
         window.location.hostname === "127.0.0.1" ||
         window.location.hostname === "0.0.0.0"
+      
+      console.log("Is secure context:", isSecureContext, "Protocol:", window.location.protocol, "Hostname:", window.location.hostname)
       
       if (!isSecureContext) {
         throw new Error("Camera requires HTTPS connection. Please use HTTPS or localhost.")
@@ -328,13 +333,28 @@ export default function ProductModal({ product, onClose, onSave }: ProductModalP
         (navigator as any).webkitGetUserMedia ||
         (navigator as any).mozGetUserMedia
       
+      console.log("getUserMedia available:", !!getUserMedia, "mediaDevices:", !!navigator.mediaDevices)
+      
       if (!getUserMedia) {
         throw new Error("Camera API not supported in this browser. Please use a modern browser like Chrome, Firefox, or Safari.")
       }
       
       // Use appropriate scanner element ID based on which one exists
       let scannerId = scannerElementId
-      if (!document.getElementById(scannerElementId)) {
+      const createModeElement = document.getElementById(scannerElementId)
+      const editModeElement = document.getElementById(scannerElementIdEdit)
+      
+      console.log("Scanner elements - Create:", !!createModeElement, "Edit:", !!editModeElement)
+      
+      if (!createModeElement && !editModeElement) {
+        // Wait a bit and try again
+        await new Promise(resolve => setTimeout(resolve, 200))
+        if (!document.getElementById(scannerElementId) && !document.getElementById(scannerElementIdEdit)) {
+          throw new Error("Scanner element not found. Please try again.")
+        }
+      }
+      
+      if (!createModeElement) {
         scannerId = scannerElementIdEdit
       }
       
@@ -343,6 +363,8 @@ export default function ProductModal({ product, onClose, onSave }: ProductModalP
       if (!scannerElement) {
         throw new Error("Scanner element not found. Please try again.")
       }
+      
+      console.log("Using scanner ID:", scannerId)
       
       // Wait a bit for the DOM element to be ready (longer on mobile)
       await new Promise(resolve => setTimeout(resolve, isMobile ? 500 : 300))
@@ -833,7 +855,16 @@ Example: SN001, SN002, SN003"
                       {!isScanning ? (
                         <button
                           type="button"
-                          onClick={startCameraScanning}
+                          onClick={(e) => {
+                            e.preventDefault()
+                            e.stopPropagation()
+                            console.log("Start Camera button clicked")
+                            startCameraScanning().catch((err) => {
+                              console.error("Error in startCameraScanning:", err)
+                              setScanError(err.message || "Failed to start camera")
+                              setIsScanning(false)
+                            })
+                          }}
                           className="flex items-center gap-2 px-3 py-1.5 bg-green-600 hover:bg-green-700 text-white rounded-lg transition text-sm"
                         >
                           <Camera className="w-4 h-4" />
@@ -851,39 +882,44 @@ Example: SN001, SN002, SN003"
                       )}
                     </div>
                     
-                    {isScanning && (
-                      <div className="mb-3">
-                        <div 
-                          id={scannerElementId} 
-                          className="w-full max-w-md mx-auto rounded-lg overflow-hidden border border-slate-600 bg-black"
-                          style={{ 
-                            minHeight: "250px",
-                            maxHeight: "400px",
-                            position: "relative"
-                          }}
-                        ></div>
-                        {scanError && (
-                          <div className="mt-2 p-2 bg-red-900/20 border border-red-500/50 rounded text-xs text-red-400">
-                            <p className="font-medium">Camera Error:</p>
-                            <p>{scanError}</p>
-                            <p className="mt-1 text-red-300 text-[10px]">
-                              {scanError.includes("permission") && "• Allow camera access when prompted\n• Or go to browser settings → Site settings → Camera → Allow"}
-                              {scanError.includes("HTTPS") && "• Please access this page via HTTPS or localhost"}
-                              {scanError.includes("in use") && "• Close other applications using the camera\n• Refresh the page and try again"}
-                            </p>
-                          </div>
-                        )}
-                        {!scanError && (
-                          <div className="mt-2 text-center">
-                            <p className="text-xs text-slate-400">
-                              Point your camera at the barcode to scan
-                            </p>
-                            <p className="text-[10px] text-slate-500 mt-1">
-                              Make sure the barcode is well-lit and in focus
-                            </p>
-                          </div>
-                        )}
-                      </div>
+                    {/* Scanner element - always in DOM but hidden when not scanning */}
+                    <div className="mb-3">
+                      <div 
+                        id={scannerElementId} 
+                        className="w-full max-w-md mx-auto rounded-lg overflow-hidden border border-slate-600 bg-black"
+                        style={{ 
+                          minHeight: isScanning ? "250px" : "0",
+                          maxHeight: "400px",
+                          position: "relative",
+                          display: isScanning ? "block" : "none"
+                        }}
+                      ></div>
+                      {isScanning && (
+                        <>
+                          {scanError && (
+                            <div className="mt-2 p-2 bg-red-900/20 border border-red-500/50 rounded text-xs text-red-400">
+                              <p className="font-medium">Camera Error:</p>
+                              <p>{scanError}</p>
+                              <p className="mt-1 text-red-300 text-[10px]">
+                                {scanError.includes("permission") && "• Allow camera access when prompted\n• Or go to browser settings → Site settings → Camera → Allow"}
+                                {scanError.includes("HTTPS") && "• Please access this page via HTTPS or localhost"}
+                                {scanError.includes("in use") && "• Close other applications using the camera\n• Refresh the page and try again"}
+                              </p>
+                            </div>
+                          )}
+                          {!scanError && (
+                            <div className="mt-2 text-center">
+                              <p className="text-xs text-slate-400">
+                                Point your camera at the barcode to scan
+                              </p>
+                              <p className="text-[10px] text-slate-500 mt-1">
+                                Make sure the barcode is well-lit and in focus
+                              </p>
+                            </div>
+                          )}
+                        </>
+                      )}
+                    </div>
                     )}
                   </div>
 
@@ -1415,7 +1451,16 @@ Example: SN001, SN002, SN003"
                           {!isScanning ? (
                             <button
                               type="button"
-                              onClick={startCameraScanning}
+                              onClick={(e) => {
+                                e.preventDefault()
+                                e.stopPropagation()
+                                console.log("Start Camera button clicked (edit mode)")
+                                startCameraScanning().catch((err) => {
+                                  console.error("Error in startCameraScanning:", err)
+                                  setScanError(err.message || "Failed to start camera")
+                                  setIsScanning(false)
+                                })
+                              }}
                               className="flex items-center gap-2 px-3 py-1.5 bg-green-600 hover:bg-green-700 text-white rounded-lg transition text-sm"
                             >
                               <Camera className="w-4 h-4" />
@@ -1433,40 +1478,44 @@ Example: SN001, SN002, SN003"
                           )}
                         </div>
                         
-                        {isScanning && (
-                          <div className="mb-3">
-                            <div 
-                              id={scannerElementIdEdit} 
-                              className="w-full max-w-md mx-auto rounded-lg overflow-hidden border border-slate-600 bg-black"
-                              style={{ 
-                                minHeight: "250px",
-                                maxHeight: "400px",
-                                position: "relative"
-                              }}
-                            ></div>
-                            {scanError && (
-                              <div className="mt-2 p-2 bg-red-900/20 border border-red-500/50 rounded text-xs text-red-400">
-                                <p className="font-medium">Camera Error:</p>
-                                <p>{scanError}</p>
-                                <p className="mt-1 text-red-300 text-[10px]">
-                                  {scanError.includes("permission") && "• Allow camera access when prompted\n• Or go to browser settings → Site settings → Camera → Allow"}
-                                  {scanError.includes("HTTPS") && "• Please access this page via HTTPS or localhost"}
-                                  {scanError.includes("in use") && "• Close other applications using the camera\n• Refresh the page and try again"}
-                                </p>
-                              </div>
-                            )}
-                            {!scanError && (
-                              <div className="mt-2 text-center">
-                                <p className="text-xs text-slate-400">
-                                  Point your camera at the barcode to scan
-                                </p>
-                                <p className="text-[10px] text-slate-500 mt-1">
-                                  Make sure the barcode is well-lit and in focus
-                                </p>
-                              </div>
-                            )}
-                          </div>
-                        )}
+                        {/* Scanner element - always in DOM but hidden when not scanning */}
+                        <div className="mb-3">
+                          <div 
+                            id={scannerElementIdEdit} 
+                            className="w-full max-w-md mx-auto rounded-lg overflow-hidden border border-slate-600 bg-black"
+                            style={{ 
+                              minHeight: isScanning ? "250px" : "0",
+                              maxHeight: "400px",
+                              position: "relative",
+                              display: isScanning ? "block" : "none"
+                            }}
+                          ></div>
+                          {isScanning && (
+                            <>
+                              {scanError && (
+                                <div className="mt-2 p-2 bg-red-900/20 border border-red-500/50 rounded text-xs text-red-400">
+                                  <p className="font-medium">Camera Error:</p>
+                                  <p>{scanError}</p>
+                                  <p className="mt-1 text-red-300 text-[10px]">
+                                    {scanError.includes("permission") && "• Allow camera access when prompted\n• Or go to browser settings → Site settings → Camera → Allow"}
+                                    {scanError.includes("HTTPS") && "• Please access this page via HTTPS or localhost"}
+                                    {scanError.includes("in use") && "• Close other applications using the camera\n• Refresh the page and try again"}
+                                  </p>
+                                </div>
+                              )}
+                              {!scanError && (
+                                <div className="mt-2 text-center">
+                                  <p className="text-xs text-slate-400">
+                                    Point your camera at the barcode to scan
+                                  </p>
+                                  <p className="text-[10px] text-slate-500 mt-1">
+                                    Make sure the barcode is well-lit and in focus
+                                  </p>
+                                </div>
+                              )}
+                            </>
+                          )}
+                        </div>
                       </div>
 
                       {/* Manual Input Section */}
