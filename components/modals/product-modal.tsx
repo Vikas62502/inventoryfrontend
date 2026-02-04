@@ -381,7 +381,7 @@ export default function ProductModal({ product, onClose, onSave }: ProductModalP
       }
       
       // Determine camera configuration
-      let cameraConfig: string | { facingMode: string } | null = null
+      let cameraConfig: string | { facingMode: string }
       
       if (cameras.length > 0) {
         // Try to find back camera first (preferred for mobile scanning)
@@ -920,7 +920,6 @@ Example: SN001, SN002, SN003"
                         </>
                       )}
                     </div>
-                    )}
                   </div>
 
                   {/* Manual Input Section */}
