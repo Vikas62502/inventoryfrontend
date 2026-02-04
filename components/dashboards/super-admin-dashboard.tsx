@@ -96,18 +96,32 @@ export default function SuperAdminDashboard({ userName }: SuperAdminDashboardPro
     return uniqueNames.join(", ")
   }
 
-  // Load categories
+  // Load categories from API and also extract unique categories from products
   useEffect(() => {
     const loadCategories = async () => {
       try {
         const cats = await categoriesApi.getAll()
-        setCategories(cats.map(c => c.label))
+        const apiCategories = cats.map(c => c.label)
+        
+        // Also get unique categories from existing products
+        const productCategories = Array.from(
+          new Set(inventory.products.map(p => p.category).filter(Boolean))
+        )
+        
+        // Combine and deduplicate
+        const allCategories = Array.from(new Set([...apiCategories, ...productCategories]))
+        setCategories(allCategories.sort())
       } catch (err) {
         console.error("Failed to load categories:", err)
+        // Fallback: extract categories from products only
+        const productCategories = Array.from(
+          new Set(inventory.products.map(p => p.category).filter(Boolean))
+        )
+        setCategories(productCategories.sort())
       }
     }
     loadCategories()
-  }, [])
+  }, [inventory.products])
 
   // Load product units from reference catalog (for displaying KGS/NOS/etc in UI)
   useEffect(() => {
@@ -515,15 +529,39 @@ export default function SuperAdminDashboard({ userName }: SuperAdminDashboardPro
             </TabsTrigger>
           </TabsList>
         </div>
-        <TabsContent value="overview" className="mt-0">
-      <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
-        {/* Products Management */}
-        <div className="lg:col-span-2 space-y-4 mt-4 sm:mt-0">
-          <div className="flex items-center justify-between flex-wrap gap-2 sm:gap-4">
-            <h2 className="text-base sm:text-lg md:text-xl font-bold text-white flex items-center gap-2">
-              <Package className="w-4 h-4 sm:w-5 sm:h-5 text-blue-500" />
-              Products Catalog
-            </h2>
+        <TabsContent value="overview" className="mt-[60px] md:mt-0 space-y-6">
+      {/* Users Section - First */}
+      <div className="space-y-4">
+        <div className="flex items-center justify-between flex-wrap gap-2 sm:gap-4">
+          <h2 className="text-base sm:text-lg md:text-xl font-bold text-white flex items-center gap-2">
+            <Users className="w-4 h-4 sm:w-5 sm:h-5 text-purple-500" />
+            Users
+          </h2>
+        </div>
+        
+        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
+          <Card className="bg-slate-800 border-slate-700 p-4">
+            <p className="text-slate-400 text-sm mb-2">Total Admins</p>
+            <p className="text-2xl font-bold text-purple-400">{admins.length}</p>
+          </Card>
+          <Card className="bg-slate-800 border-slate-700 p-4">
+            <p className="text-slate-400 text-sm mb-2">Total Agents</p>
+            <p className="text-2xl font-bold text-cyan-400">{allAgents.length}</p>
+          </Card>
+          <Card className="bg-slate-800 border-slate-700 p-4">
+            <p className="text-slate-400 text-sm mb-2">Pending Approvals</p>
+            <p className="text-2xl font-bold text-amber-400">{filteredPendingAgents.length}</p>
+          </Card>
+        </div>
+      </div>
+
+      {/* Products Catalog Section - Second */}
+      <div className="space-y-4">
+        <div className="flex items-center justify-between flex-wrap gap-2 sm:gap-4">
+          <h2 className="text-base sm:text-lg md:text-xl font-bold text-white flex items-center gap-2">
+            <Package className="w-4 h-4 sm:w-5 sm:h-5 text-blue-500" />
+            Products Catalog
+          </h2>
             <div className="flex gap-2 flex-wrap">
             <Button
               onClick={() => {
@@ -565,32 +603,32 @@ export default function SuperAdminDashboard({ userName }: SuperAdminDashboardPro
             </div>
 
             {/* Products List */}
-            <div className="space-y-3 max-h-[600px] overflow-y-auto">
+            <div className="space-y-3 max-h-[600px] overflow-y-auto pr-1">
               {filteredProducts.length > 0 ? (
                 filteredProducts.map((product) => (
-                  <Card key={product.id} className="bg-slate-800 border-slate-700 p-4">
-                    <div className="flex flex-col sm:flex-row items-start justify-between gap-3 sm:gap-0">
-                      <div className="flex-1 min-w-0">
-                        <h3 className="font-semibold text-white mb-1 truncate">{product.name}</h3>
-                        <div className="grid grid-cols-2 md:grid-cols-3 gap-2 md:gap-4 text-sm">
-                          <div>
-                            <p className="text-slate-400 text-xs">Model</p>
+                  <Card key={product.id} className="bg-slate-800 border-slate-700 p-3 sm:p-4">
+                    <div className="flex flex-col sm:flex-row items-start justify-between gap-3">
+                      <div className="flex-1 min-w-0 w-full sm:w-auto">
+                        <h3 className="font-semibold text-white mb-2 sm:mb-1 truncate text-sm sm:text-base">{product.name}</h3>
+                        <div className="grid grid-cols-2 sm:grid-cols-3 gap-2 sm:gap-4 text-xs sm:text-sm">
+                          <div className="min-w-0">
+                            <p className="text-slate-400 text-xs mb-0.5">Model</p>
                             <p className="text-white truncate">{product.model}</p>
                           </div>
-                          <div>
-                            <p className="text-slate-400 text-xs">Category</p>
+                          <div className="min-w-0">
+                            <p className="text-slate-400 text-xs mb-0.5">Category</p>
                             <p className="text-white truncate">{product.category}</p>
                           </div>
-                          <div>
-                            <p className="text-slate-400 text-xs">Quantity</p>
-                            <p className={`font-semibold ${(product.quantity || 0) < 50 ? "text-red-400" : "text-cyan-400"}`}>
+                          <div className="min-w-0 col-span-2 sm:col-span-1">
+                            <p className="text-slate-400 text-xs mb-0.5">Quantity</p>
+                            <p className={`font-semibold text-sm sm:text-base ${(product.quantity || 0) < 50 ? "text-red-400" : "text-cyan-400"}`}>
                               {product.quantity || 0}
                               {referenceUnitsByName[product.name] ? ` ${referenceUnitsByName[product.name]}` : ""}
                             </p>
                           </div>
                         </div>
                       </div>
-                      <div className="flex gap-2 ml-2 sm:ml-4 flex-shrink-0">
+                      <div className="flex gap-2 w-full sm:w-auto sm:ml-4 flex-shrink-0 justify-end sm:justify-start">
                         <Button
                           onClick={() => {
                             setEditingProduct(product as Product)
@@ -598,21 +636,25 @@ export default function SuperAdminDashboard({ userName }: SuperAdminDashboardPro
                           }}
                           size="sm"
                           variant="outline"
-                          className="border-slate-600 text-slate-300"
+                          className="border-slate-600 text-slate-300 flex-1 sm:flex-none"
                         >
-                          <Edit2 className="w-4 h-4" />
+                          <Edit2 className="w-4 h-4 sm:mr-0" />
+                          <span className="ml-1 sm:hidden">Edit</span>
                         </Button>
                         <Button
                           onClick={() => handleDeleteProduct(product.id)}
                           size="sm"
                           variant="outline"
                           disabled={isDeleting === product.id}
-                          className="border-red-600 text-red-400 hover:bg-red-950"
+                          className="border-red-600 text-red-400 hover:bg-red-950 flex-1 sm:flex-none"
                         >
                           {isDeleting === product.id ? (
                             <Loader2 className="w-4 h-4 animate-spin" />
                           ) : (
-                          <Trash2 className="w-4 h-4" />
+                            <>
+                              <Trash2 className="w-4 h-4 sm:mr-0" />
+                              <span className="ml-1 sm:hidden">Delete</span>
+                            </>
                           )}
                         </Button>
                       </div>
@@ -620,116 +662,16 @@ export default function SuperAdminDashboard({ userName }: SuperAdminDashboardPro
                   </Card>
                 ))
               ) : (
-                <Card className="bg-slate-800 border-slate-700 p-4 text-center">
-                  <p className="text-slate-400">No products found</p>
+                <Card className="bg-slate-800 border-slate-700 p-4 sm:p-6 text-center">
+                  <p className="text-slate-400 text-sm sm:text-base">No products found</p>
                 </Card>
               )}
             </div>
           </div>
         </div>
-
-        {/* Stock Requests Overview */}
-        <div className="space-y-4">
-          <h2 className="text-xl font-bold text-white flex items-center gap-2">
-            <TrendingUp className="w-5 h-5 text-amber-500" />
-            Admin Requests
-          </h2>
-
-          <div className="space-y-3">
-            <Card className="bg-amber-950/30 border-amber-700 border p-3">
-              <p className="text-slate-400 text-xs mb-1">Pending</p>
-              <p className="text-2xl font-bold text-amber-400">{pendingRequests}</p>
-            </Card>
-            <Card className="bg-green-950/30 border-green-700 border p-3">
-              <p className="text-slate-400 text-xs mb-1">Dispatched</p>
-              <p className="text-2xl font-bold text-green-400">{dispatchedRequests}</p>
-            </Card>
-            <Card className="bg-cyan-950/30 border-cyan-700 border p-3">
-              <p className="text-slate-400 text-xs mb-1">Confirmed</p>
-              <p className="text-2xl font-bold text-cyan-400">{confirmedRequests}</p>
-            </Card>
-            <Card className="bg-red-950/30 border-red-700 border p-3">
-              <p className="text-slate-400 text-xs mb-1">Rejected</p>
-              <p className="text-2xl font-bold text-red-400">{rejectedRequests}</p>
-            </Card>
-          </div>
-
-          <h2 className="text-lg font-bold text-white mt-6">Recent Requests</h2>
-          
-          {/* Search by User */}
-          <div className="relative">
-            <Search className="w-4 h-4 absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" />
-            <input
-              type="text"
-              placeholder="Search by admin name..."
-              value={requestsSearchQuery}
-              onChange={(e) => setRequestsSearchQuery(e.target.value)}
-              className="w-full pl-10 pr-4 py-2 bg-slate-700 border border-slate-600 rounded-lg text-white placeholder-slate-500 focus:outline-none focus:border-blue-500"
-            />
-          </div>
-          
-          <div className="space-y-3 max-h-[400px] overflow-y-auto">
-            {filteredAdminRequests.slice(0, 10).map((request) => (
-              <Card
-                key={request.id}
-                className={`border-l-4 p-3 ${
-                  request.status === "pending"
-                    ? "bg-amber-950/30 border-l-amber-500 border border-slate-700"
-                    : request.status === "dispatched"
-                      ? "bg-green-950/30 border-l-green-500 border border-slate-700"
-                      : request.status === "confirmed"
-                        ? "bg-cyan-950/30 border-l-cyan-500 border border-slate-700"
-                      : "bg-red-950/30 border-l-red-500 border border-slate-700"
-                }`}
-              >
-                <div className="flex items-start justify-between mb-2">
-                  <div>
-                    <p className="font-semibold text-white text-sm">
-                      {formatProductNames(request)}
-                    </p>
-                    <p className="text-xs text-slate-400">From: {request.requested_by_name || "Admin"}</p>
-                  </div>
-                  <span className={`px-2 py-1 text-xs font-semibold rounded ${
-                    request.status === "pending" ? "bg-amber-500 text-amber-950" :
-                    request.status === "dispatched" ? "bg-green-500 text-green-950" :
-                    request.status === "confirmed" ? "bg-cyan-500 text-cyan-950" :
-                    "bg-red-500 text-red-950"
-                  }`}>
-                    {request.status.charAt(0).toUpperCase() + request.status.slice(1)}
-                    </span>
-                </div>
-                <p className="text-white font-bold text-xs mb-2">
-                  Qty: {request.items?.reduce((sum, item) => sum + item.quantity, 0) || 0}
-                </p>
-                {request.status === "pending" && (
-                  <Button
-                    type="button"
-                    size="sm"
-                    onClick={(e) => {
-                      e.preventDefault()
-                      e.stopPropagation()
-                      setSelectedRequest(request)
-                      setShowApprovalModal(true)
-                    }}
-                    className="w-full bg-green-600 hover:bg-green-700 text-white hover:text-slate-100 text-xs mt-2"
-                  >
-                    Review & Dispatch
-                  </Button>
-                )}
-                {request.status === "rejected" && request.rejection_reason && (
-                  <p className="text-xs text-red-300 mt-1">Reason: {request.rejection_reason}</p>
-                )}
-              </Card>
-            ))}
-            {filteredAdminRequests.length === 0 && (
-              <p className="text-slate-400 text-sm text-center py-4">No requests yet</p>
-            )}
-          </div>
-        </div>
-      </div>
         </TabsContent>
 
-        <TabsContent value="stock-requests" className="mt-4 space-y-6">
+        <TabsContent value="stock-requests" className="mt-[60px] md:mt-0 space-y-6">
           {/* Stock Requests List */}
           <div className="space-y-4">
             <div className="flex items-center justify-between flex-wrap gap-4">
@@ -813,7 +755,7 @@ export default function SuperAdminDashboard({ userName }: SuperAdminDashboardPro
           </div>
         </TabsContent>
 
-        <TabsContent value="agent-approvals" className="mt-4 space-y-6">
+        <TabsContent value="agent-approvals" className="mt-[60px] md:mt-0 space-y-6">
           {/* Pending Agent Approvals Section */}
           {filteredPendingAgents.length > 0 ? (
             <div className="space-y-4">
@@ -1103,7 +1045,7 @@ export default function SuperAdminDashboard({ userName }: SuperAdminDashboardPro
           )}
         </TabsContent>
 
-        <TabsContent value="returns" className="mt-4">
+        <TabsContent value="returns" className="mt-[60px] md:mt-0">
           {/* Stock Returns Section */}
           {sortedStockReturns.length > 0 ? (
             <div className="space-y-4">
@@ -1251,7 +1193,7 @@ export default function SuperAdminDashboard({ userName }: SuperAdminDashboardPro
           )}
         </TabsContent>
 
-        <TabsContent value="users" className="mt-4">
+        <TabsContent value="users" className="mt-[60px] md:mt-0">
           <div className="space-y-6">
             <div className="flex items-center justify-between flex-wrap gap-4">
               <h2 className="text-xl font-bold text-white flex items-center gap-2">

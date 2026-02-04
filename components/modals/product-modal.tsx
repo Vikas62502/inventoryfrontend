@@ -648,6 +648,21 @@ export default function ProductModal({ product, onClose, onSave }: ProductModalP
         }
       }
 
+      // Check for duplicate product when creating new product
+      if (!product?.id) {
+        // Check if product with same name and model already exists
+        const duplicateProduct = products.find(
+          p => p.name.toLowerCase().trim() === formData.name.toLowerCase().trim() &&
+               p.model.toLowerCase().trim() === formData.model.toLowerCase().trim()
+        )
+        
+        if (duplicateProduct) {
+          setError(`This product already exists! Product "${formData.name}" with model "${formData.model}" is already present in the system. Please edit the existing product to add quantity.`)
+          setLoading(false)
+          return
+        }
+      }
+      
       // Calculate final quantity: if editing and stockToAdd > 0, add to existing; otherwise use formData.quantity
       let finalQuantity = formData.quantity || 0
       if (product?.id && stockToAdd > 0) {
