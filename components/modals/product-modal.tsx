@@ -423,26 +423,31 @@ export default function ProductModal({ product, onClose, onSave }: ProductModalP
           disableFlip: false,
         },
         async (decodedText) => {
-          // Successfully scanned
+          // Successfully scanned - stop immediately to prevent multiple scans
           const newSerial = decodedText.trim()
+          
+          // Stop scanner first to prevent multiple scans
+          try {
+            if (qrCodeScannerRef.current) {
+              await qrCodeScannerRef.current.stop()
+              await qrCodeScannerRef.current.clear()
+              qrCodeScannerRef.current = null
+            }
+            setIsScanning(false)
+            setScanError(null)
+          } catch (stopErr) {
+            console.error("Error stopping camera after scan:", stopErr)
+            setIsScanning(false)
+            qrCodeScannerRef.current = null
+          }
+          
+          // Then process the scanned serial number
           if (newSerial && !serialNumbers.includes(newSerial)) {
             setSerialNumbers([...serialNumbers, newSerial])
             setSerialNumberInput("")
-            // Stop scanning after successful scan
-            try {
-              await stopCameraScanning()
-            } catch (err) {
-              console.error("Error stopping camera after scan:", err)
-            }
           } else if (serialNumbers.includes(newSerial)) {
             setError("Serial number already added")
             setTimeout(() => setError(null), 3000)
-            // Stop scanning if duplicate detected
-            try {
-              await stopCameraScanning()
-            } catch (err) {
-              console.error("Error stopping camera after duplicate:", err)
-            }
           }
         },
         (errorMessage) => {
