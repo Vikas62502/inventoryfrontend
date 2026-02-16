@@ -338,9 +338,11 @@ export default function ProductModal({ product, onClose, onSave }: ProductModalP
   }
 
   // Camera barcode scanning functions
-  const startCameraScanning = async () => {
+  const isChrome = typeof navigator !== "undefined" && /Chrome/i.test(navigator.userAgent) && !/Edge|Edg|OPR/i.test(navigator.userAgent)
+  
+  const startCameraScanning = async (retryWithUserFacing = false) => {
     try {
-      console.log("startCameraScanning called")
+      console.log("startCameraScanning called", { retryWithUserFacing, isChrome })
       setScanError(null)
       setIsScanning(true)
       
@@ -402,8 +404,8 @@ export default function ProductModal({ product, onClose, onSave }: ProductModalP
       
       console.log("Using scanner ID:", scannerId)
       
-      // Wait a bit for the DOM element to be ready (longer on mobile)
-      await new Promise(resolve => setTimeout(resolve, isMobile ? 500 : 300))
+      // Wait a bit for the DOM element to be ready (longer on mobile, extra for Chrome)
+      await new Promise(resolve => setTimeout(resolve, isMobile ? 500 : isChrome ? 400 : 300))
       
       const html5QrCode = new Html5Qrcode(scannerId)
       qrCodeScannerRef.current = html5QrCode
@@ -420,22 +422,33 @@ export default function ProductModal({ product, onClose, onSave }: ProductModalP
       let cameraConfig: string | { facingMode: string }
       
       if (cameras.length > 0) {
-        // Try to find back camera first (preferred for mobile scanning)
-        const backCamera = cameras.find(cam => 
-          cam.label.toLowerCase().includes("back") || 
-          cam.label.toLowerCase().includes("rear") ||
-          cam.label.toLowerCase().includes("environment")
-        )
-        
-        if (backCamera) {
-          cameraConfig = backCamera.id
+        // Chrome: prefer "user" (front) camera as fallback - Chrome has known issues with "environment"
+        if (retryWithUserFacing && isChrome) {
+          const frontCamera = cameras.find(cam => 
+            cam.label.toLowerCase().includes("front") || 
+            cam.label.toLowerCase().includes("user") ||
+            cam.label.toLowerCase().includes("face")
+          )
+          cameraConfig = frontCamera ? frontCamera.id : cameras[0].id
         } else {
-          // Use first available camera
-          cameraConfig = cameras[0].id
+          // Try to find back camera first (preferred for mobile scanning)
+          const backCamera = cameras.find(cam => 
+            cam.label.toLowerCase().includes("back") || 
+            cam.label.toLowerCase().includes("rear") ||
+            cam.label.toLowerCase().includes("environment")
+          )
+          if (backCamera) {
+            cameraConfig = backCamera.id
+          } else {
+            cameraConfig = cameras[0].id
+          }
         }
       } else {
         // Fallback to facingMode if camera enumeration fails (common on mobile)
-        cameraConfig = { facingMode: "environment" } // Back camera for mobile
+        // Chrome: use "user" on retry; "environment" can fail with NotReadableError
+        cameraConfig = retryWithUserFacing && isChrome 
+          ? { facingMode: "user" } 
+          : { facingMode: "environment" }
       }
       
       // Calculate qrbox size based on screen size (mobile-friendly)
@@ -506,13 +519,31 @@ export default function ProductModal({ product, onClose, onSave }: ProductModalP
       } else if (err.name === "NotFoundError" || err.name === "DevicesNotFoundError") {
         errorMessage = "No camera found. Please connect a camera device."
       } else if (err.name === "NotReadableError" || err.name === "TrackStartError") {
-        errorMessage = "Camera is already in use by another application. Please close other apps using the camera."
+        // Chrome has known issues with camera - retry with front camera as fallback
+        if (isChrome && !retryWithUserFacing) {
+          console.log("Chrome NotReadableError - retrying with front camera")
+          if (qrCodeScannerRef.current) {
+            try {
+              await qrCodeScannerRef.current.stop()
+            } catch (_) {}
+            try {
+              await qrCodeScannerRef.current.clear()
+            } catch (_) {}
+            qrCodeScannerRef.current = null
+          }
+          setIsScanning(false)
+          setTimeout(() => startCameraScanning(true), 500)
+          return
+        }
+        errorMessage = "Camera is already in use or could not start. Try Safari, or close other apps using the camera."
       } else if (err.name === "OverconstrainedError") {
         errorMessage = "Camera constraints not supported. Trying with default settings..."
-        // Retry with simpler constraints
-        setTimeout(() => {
-          startCameraScanning()
-        }, 1000)
+        // Retry with front camera (simpler constraints) - helps Chrome
+        if (isChrome && !retryWithUserFacing) {
+          setTimeout(() => startCameraScanning(true), 1000)
+        } else {
+          setTimeout(() => startCameraScanning(), 1000)
+        }
         return
       } else if (err.message) {
         errorMessage = err.message
@@ -806,11 +837,11 @@ export default function ProductModal({ product, onClose, onSave }: ProductModalP
       if (isSuperAdmin && product?.id) {
         // Super Admin: set selling_price only (do NOT overwrite unit_price/cost price)
         productData.use_max_cost_price = useMaxCostForSelling
-        if (useMaxCostForSelling) {
-          // Backend will compute selling_price from max cost of serial numbers
-        } else if (sellingPriceOverride > 0) {
+        if (sellingPriceOverride > 0) {
+          // Manual override – always send when user has entered a value
           productData.selling_price = sellingPriceOverride
         }
+        // When use_max_cost_price true and no manual override, backend uses max cost from serials
         // Do NOT send unit_price - it is cost price and stays unchanged
       } else if (formData.price && formData.price > 0) {
         productData.unit_price = formData.price
@@ -1027,10 +1058,10 @@ Example: SN001, SN002, SN003"
                             <div className="mt-2 p-2 bg-red-900/20 border border-red-500/50 rounded text-xs text-red-400">
                               <p className="font-medium">Camera Error:</p>
                               <p>{scanError}</p>
-                              <p className="mt-1 text-red-300 text-[10px]">
+                              <p className="mt-1 text-red-300 text-[10px] whitespace-pre-line">
                                 {scanError.includes("permission") && "• Allow camera access when prompted\n• Or go to browser settings → Site settings → Camera → Allow"}
                                 {scanError.includes("HTTPS") && "• Please access this page via HTTPS or localhost"}
-                                {scanError.includes("in use") && "• Close other applications using the camera\n• Refresh the page and try again"}
+                                {(scanError.includes("in use") || scanError.includes("could not start")) && "• Close other apps using the camera\n• Try Safari if Chrome doesn't work\n• Refresh the page and try again"}
                               </p>
                             </div>
                           )}
@@ -1580,54 +1611,47 @@ Example: SN001, SN002, SN003"
                 </div>
               </div>
               
-              {/* Super Admin: Selling Price per product */}
+              {/* Super Admin: Selling Price – separate field, applies to whole product (by name) */}
               {isSuperAdmin && product?.id && (
-                <div className="p-4 bg-slate-800/50 border border-slate-600 rounded-lg space-y-3">
+                <div className="p-4 bg-emerald-900/20 border border-emerald-600/50 rounded-lg space-y-3">
                   <div className="flex items-center gap-2">
-                    <DollarSign className="w-5 h-5 text-amber-500" />
-                    <label className="text-sm font-medium text-slate-300">Selling Price</label>
+                    <DollarSign className="w-5 h-5 text-emerald-500" />
+                    <label className="text-sm font-medium text-slate-300">Selling Price (₹)</label>
                   </div>
+                  <p className="text-xs text-slate-400">
+                    Applies to product: <span className="text-white font-medium">{product?.name}</span>
+                  </p>
                   <div className="flex items-center gap-3">
                     <Checkbox
                       id="useMaxCostForSelling"
                       checked={useMaxCostForSelling}
                       onCheckedChange={(checked) => setUseMaxCostForSelling(!!checked)}
-                      className="border-2 border-slate-400 bg-slate-700 shrink-0 data-[state=checked]:bg-blue-600 data-[state=checked]:border-blue-600"
+                      className="border-2 border-slate-400 bg-slate-700 shrink-0 data-[state=checked]:bg-emerald-600 data-[state=checked]:border-emerald-600"
                     />
                     <label htmlFor="useMaxCostForSelling" className="text-sm font-medium text-slate-300 cursor-pointer select-none">
-                      Use max cost price from registered stock (default)
+                      Use max cost from registered stock (default)
                     </label>
                   </div>
-                  {useMaxCostForSelling ? (
-                    <div className="text-sm text-slate-400">
-                      {Array.isArray(assignedSerialNumbers) && assignedSerialNumbers.length > 0 ? (
-                        (() => {
-                          const maxCost = Math.max(...assignedSerialNumbers.map(s => (s.cost_price ?? 0) || 0), 0)
-                          return maxCost > 0 ? (
-                            <p>Default selling price: ₹{maxCost.toLocaleString()} (max cost from {assignedSerialNumbers.length} serial number{assignedSerialNumbers.length !== 1 ? 's' : ''})</p>
-                          ) : (
-                            <p>No cost prices in serial numbers yet. Set a manual selling price below or add cost prices when adding stock.</p>
-                          )
-                        })()
-                      ) : (
-                        <p>No serial numbers yet. Set a manual selling price below or add stock with serial numbers.</p>
-                      )}
-                    </div>
-                  ) : (
-                    <div>
-                      <label className="block text-sm font-medium text-slate-300 mb-2">Selling Price (₹) – manual override</label>
-                      <input
-                        type="text"
-                        value={sellingPriceOverride || ""}
-                        onChange={(e) => {
-                          const value = e.target.value.replace(/[^\d.]/g, "")
-                          setSellingPriceOverride(value ? parseFloat(value) || 0 : 0)
-                        }}
-                        placeholder="Enter selling price"
-                        className="w-full px-4 py-2 bg-slate-700 border border-slate-600 rounded-lg text-white placeholder-slate-500 focus:outline-none focus:border-blue-500"
-                      />
-                    </div>
-                  )}
+                  {useMaxCostForSelling && Array.isArray(assignedSerialNumbers) && assignedSerialNumbers.length > 0 && (() => {
+                    const maxCost = Math.max(...assignedSerialNumbers.map(s => (s.cost_price ?? 0) || 0), 0)
+                    return maxCost > 0 ? (
+                      <p className="text-sm text-emerald-400">Computed: ₹{maxCost.toLocaleString()} (max cost from {assignedSerialNumbers.length} serial number{assignedSerialNumbers.length !== 1 ? 's' : ''})</p>
+                    ) : null
+                  })()}
+                  <div>
+                    <label className="block text-sm font-medium text-slate-300 mb-2">Selling Price (₹) – set for this product</label>
+                    <input
+                      type="text"
+                      value={sellingPriceOverride || ""}
+                      onChange={(e) => {
+                        const value = e.target.value.replace(/[^\d.]/g, "")
+                        setSellingPriceOverride(value ? parseFloat(value) || 0 : 0)
+                      }}
+                      placeholder={useMaxCostForSelling ? "Override with manual price (or leave for max cost)" : "Enter selling price"}
+                      className="w-full px-4 py-2 bg-slate-700 border border-slate-600 rounded-lg text-white placeholder-slate-500 focus:outline-none focus:border-emerald-500"
+                    />
+                    <p className="text-xs text-slate-500 mt-1">Separate from cost price. Used for quotations and sales.</p>
+                  </div>
                 </div>
               )}
               
@@ -1809,10 +1833,10 @@ Example: SN001, SN002, SN003"
                                 <div className="mt-2 p-2 bg-red-900/20 border border-red-500/50 rounded text-xs text-red-400">
                                   <p className="font-medium">Camera Error:</p>
                                   <p>{scanError}</p>
-                                  <p className="mt-1 text-red-300 text-[10px]">
+                                  <p className="mt-1 text-red-300 text-[10px] whitespace-pre-line">
                                     {scanError.includes("permission") && "• Allow camera access when prompted\n• Or go to browser settings → Site settings → Camera → Allow"}
                                     {scanError.includes("HTTPS") && "• Please access this page via HTTPS or localhost"}
-                                    {scanError.includes("in use") && "• Close other applications using the camera\n• Refresh the page and try again"}
+                                    {(scanError.includes("in use") || scanError.includes("could not start")) && "• Close other apps using the camera\n• Try Safari if Chrome doesn't work\n• Refresh the page and try again"}
                                   </p>
                                 </div>
                               )}
@@ -2130,7 +2154,7 @@ Example: SN001, SN002, SN003"
               className="w-full px-4 py-2 bg-slate-700 border border-slate-600 rounded-lg text-white placeholder-slate-500 focus:outline-none focus:border-blue-500"
             />
             <p className="text-xs text-slate-400 mt-1">
-              {isAgent ? "Required for agents" : "Optional - can be set later or when adding serial numbers"}
+              {isAgent ? "Required for agents" : isSuperAdmin && product?.id ? "Cost price – separate from Selling Price above" : "Optional - can be set later or when adding serial numbers"}
             </p>
           </div>
 
