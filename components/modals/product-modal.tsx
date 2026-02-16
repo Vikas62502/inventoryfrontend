@@ -14,11 +14,9 @@ interface ProductModalProps {
   product?: Product | null
   onClose: () => void
   onSave: (product: Product | Omit<Product, "id">) => void
-  /** When true, auto-open View All serial numbers modal after load */
-  openSerialNumbersOnMount?: boolean
 }
 
-export default function ProductModal({ product, onClose, onSave, openSerialNumbersOnMount }: ProductModalProps) {
+export default function ProductModal({ product, onClose, onSave }: ProductModalProps) {
   // Component for adding/editing products
   const [categories, setCategories] = useState<string[]>([])
   const [products, setProducts] = useState<Product[]>([])
@@ -111,8 +109,7 @@ export default function ProductModal({ product, onClose, onSave, openSerialNumbe
   
   // Assigned serial numbers (for edit mode)
   const [assignedSerialNumbers, setAssignedSerialNumbers] = useState<SerialNumber[]>([])
-  // When opening from Eye button (openSerialNumbersOnMount), start loading so we wait for fetch before opening modal
-  const [loadingSerialNumbers, setLoadingSerialNumbers] = useState(!!(product?.id && openSerialNumbersOnMount))
+  const [loadingSerialNumbers, setLoadingSerialNumbers] = useState(false)
   const [showSerialNumbersModal, setShowSerialNumbersModal] = useState(false)
 
   useEffect(() => {
@@ -253,13 +250,6 @@ export default function ProductModal({ product, onClose, onSave, openSerialNumbe
       }
     }
   }, [product, referenceData])
-  
-  // Auto-open View All serial numbers when openSerialNumbersOnMount is true
-  useEffect(() => {
-    if (openSerialNumbersOnMount && product?.id && !loadingSerialNumbers) {
-      setShowSerialNumbersModal(true)
-    }
-  }, [openSerialNumbersOnMount, product?.id, loadingSerialNumbers])
 
   // Filter products based on selected category
   const filteredProducts = formData.category 
@@ -1629,30 +1619,10 @@ Example: SN001, SN002, SN003"
                   </div>
                   <button
                     type="button"
-                    onClick={async () => {
-                      if (product?.id) {
-                        setLoadingSerialNumbers(true)
-                        try {
-                          const serials = await serialNumbersApi.getByProduct(product.id)
-                          setAssignedSerialNumbers(Array.isArray(serials) ? serials : [])
-                        } catch {
-                          if (product.serial_numbers?.length) {
-                            setAssignedSerialNumbers(product.serial_numbers.map((sn, i) => ({
-                              id: `fallback-${i}-${sn}`,
-                              product_id: product.id!,
-                              serial_number: sn,
-                              created_at: new Date().toISOString(),
-                            })))
-                          }
-                        } finally {
-                          setLoadingSerialNumbers(false)
-                        }
-                      }
-                      setShowSerialNumbersModal(true)
-                    }}
+                    onClick={() => setShowSerialNumbersModal(true)}
                     disabled={loadingSerialNumbers}
                     className="flex items-center gap-2 px-3 py-2 bg-blue-600 hover:bg-blue-700 text-white rounded-lg transition text-sm disabled:opacity-50 disabled:cursor-not-allowed"
-                    title="View serial numbers assigned to this product"
+                    title="View all serial numbers"
                   >
                     <Eye className="w-4 h-4" />
                     View All
@@ -1669,7 +1639,6 @@ Example: SN001, SN002, SN003"
                   </div>
                   <p className="text-xs text-slate-400">
                     Applies to product: <span className="text-white font-medium">{product?.name}</span>
-                    <span className="ml-2 text-cyan-400">• Stock: {existingStock}</span>
                   </p>
                   <div className="flex items-center gap-3">
                     <Checkbox
