@@ -340,9 +340,9 @@ export default function ProductModal({ product, onClose, onSave }: ProductModalP
   // Camera barcode scanning functions
   const isChrome = typeof navigator !== "undefined" && /Chrome/i.test(navigator.userAgent) && !/Edge|Edg|OPR/i.test(navigator.userAgent)
   
-  const startCameraScanning = async (retryWithUserFacing = false) => {
+  const startCameraScanning = async (retryMode: "default" | "userFacing" | "constraintsOnly" = "default") => {
     try {
-      console.log("startCameraScanning called", { retryWithUserFacing, isChrome })
+      console.log("startCameraScanning called", { retryMode, isChrome })
       setScanError(null)
       setIsScanning(true)
       
@@ -404,8 +404,19 @@ export default function ProductModal({ product, onClose, onSave }: ProductModalP
       
       console.log("Using scanner ID:", scannerId)
       
-      // Wait a bit for the DOM element to be ready (longer on mobile, extra for Chrome)
-      await new Promise(resolve => setTimeout(resolve, isMobile ? 500 : isChrome ? 400 : 300))
+      // Wait for DOM to be ready (Chrome needs extra time for camera init)
+      await new Promise(resolve => setTimeout(resolve, isMobile ? 600 : isChrome ? 500 : 300))
+      
+      // Chrome: preflight - request camera with simplest constraints first (helps Chrome initialize)
+      if (isChrome && navigator.mediaDevices?.getUserMedia) {
+        try {
+          const testStream = await navigator.mediaDevices.getUserMedia({ video: true })
+          testStream.getTracks().forEach(t => t.stop())
+          await new Promise(resolve => setTimeout(resolve, 150))
+        } catch (preflightErr) {
+          console.debug("Chrome camera preflight failed:", preflightErr)
+        }
+      }
       
       const html5QrCode = new Html5Qrcode(scannerId)
       qrCodeScannerRef.current = html5QrCode
@@ -419,11 +430,21 @@ export default function ProductModal({ product, onClose, onSave }: ProductModalP
       }
       
       // Determine camera configuration
+      // Chrome: use "user" (front) camera by default - Chrome has known issues with "environment" (back)
       let cameraConfig: string | { facingMode: string }
       
       if (cameras.length > 0) {
-        // Chrome: prefer "user" (front) camera as fallback - Chrome has known issues with "environment"
-        if (retryWithUserFacing && isChrome) {
+        if (isChrome) {
+          // Chrome: prefer front camera or first available (more reliable than back camera)
+          const frontCamera = cameras.find(cam => 
+            cam.label.toLowerCase().includes("front") || 
+            cam.label.toLowerCase().includes("user") ||
+            cam.label.toLowerCase().includes("face") ||
+            cam.label.toLowerCase().includes("integrated") ||
+            cam.label.toLowerCase().includes("built-in")
+          )
+          cameraConfig = frontCamera ? frontCamera.id : cameras[0].id
+        } else if (retryMode === "userFacing") {
           const frontCamera = cameras.find(cam => 
             cam.label.toLowerCase().includes("front") || 
             cam.label.toLowerCase().includes("user") ||
@@ -431,24 +452,27 @@ export default function ProductModal({ product, onClose, onSave }: ProductModalP
           )
           cameraConfig = frontCamera ? frontCamera.id : cameras[0].id
         } else {
-          // Try to find back camera first (preferred for mobile scanning)
+          // Safari/Firefox: prefer back camera for mobile scanning
           const backCamera = cameras.find(cam => 
             cam.label.toLowerCase().includes("back") || 
             cam.label.toLowerCase().includes("rear") ||
             cam.label.toLowerCase().includes("environment")
           )
-          if (backCamera) {
-            cameraConfig = backCamera.id
-          } else {
-            cameraConfig = cameras[0].id
-          }
+          cameraConfig = backCamera ? backCamera.id : cameras[0].id
         }
       } else {
-        // Fallback to facingMode if camera enumeration fails (common on mobile)
-        // Chrome: use "user" on retry; "environment" can fail with NotReadableError
-        cameraConfig = retryWithUserFacing && isChrome 
-          ? { facingMode: "user" } 
-          : { facingMode: "environment" }
+        // Fallback to facingMode when enumeration fails
+        cameraConfig = (isChrome || retryMode !== "default") ? { facingMode: "user" } : { facingMode: "environment" }
+      }
+      
+      // constraintsOnly retry: use simplest config - facingMode only, no deviceId
+      if (retryMode === "constraintsOnly") {
+        cameraConfig = { facingMode: "user" }
+      }
+      
+      // Chrome desktop: when no cameras enumerated, use first available or simplest
+      if (isChrome && !isMobile && cameras.length > 0 && retryMode === "constraintsOnly") {
+        cameraConfig = cameras[0].id // First camera often works when facingMode fails
       }
       
       // Calculate qrbox size based on screen size (mobile-friendly)
@@ -458,19 +482,21 @@ export default function ProductModal({ product, onClose, onSave }: ProductModalP
         ? Math.min(screenWidth * 0.8, screenHeight * 0.4, 300) // 80% of width or 40% of height, max 300px
         : 250 // Desktop default
       
-      // Start scanning - this will automatically prompt for permission if needed
-      // The cameraConfig already includes facingMode for mobile devices
+      // Scan config - Chrome: use simpler constraints and lower FPS for stability
+      const scanConfig: any = {
+        fps: isChrome ? (isMobile ? 3 : 5) : (isMobile ? 5 : 10),
+        qrbox: { width: qrboxSize, height: qrboxSize },
+        aspectRatio: 1.0,
+        disableFlip: false,
+      }
+      // Chrome / constraintsOnly retry: explicit videoConstraints for better compatibility
+      if ((isChrome || retryMode === "constraintsOnly") && typeof cameraConfig === "object") {
+        scanConfig.videoConstraints = { facingMode: cameraConfig.facingMode || "user" }
+      }
+      
       await html5QrCode.start(
         cameraConfig,
-        {
-          fps: isMobile ? 5 : 10, // Lower FPS on mobile for better performance
-          qrbox: { 
-            width: qrboxSize, 
-            height: qrboxSize 
-          },
-          aspectRatio: 1.0,
-          disableFlip: false,
-        },
+        scanConfig,
         async (decodedText) => {
           // Successfully scanned - stop immediately to prevent multiple scans
           const newSerial = decodedText.trim()
@@ -519,28 +545,27 @@ export default function ProductModal({ product, onClose, onSave }: ProductModalP
       } else if (err.name === "NotFoundError" || err.name === "DevicesNotFoundError") {
         errorMessage = "No camera found. Please connect a camera device."
       } else if (err.name === "NotReadableError" || err.name === "TrackStartError") {
-        // Chrome has known issues with camera - retry with front camera as fallback
-        if (isChrome && !retryWithUserFacing) {
-          console.log("Chrome NotReadableError - retrying with front camera")
+        // Chrome: retry with simpler config (front camera, then constraints-only)
+        if (isChrome && retryMode !== "constraintsOnly") {
+          const nextMode = retryMode === "default" ? "userFacing" : "constraintsOnly"
+          console.log("Chrome NotReadableError - retrying with", nextMode)
           if (qrCodeScannerRef.current) {
-            try {
-              await qrCodeScannerRef.current.stop()
-            } catch (_) {}
-            try {
-              await qrCodeScannerRef.current.clear()
-            } catch (_) {}
+            try { await qrCodeScannerRef.current.stop() } catch (_) {}
+            try { await qrCodeScannerRef.current.clear() } catch (_) {}
             qrCodeScannerRef.current = null
           }
           setIsScanning(false)
-          setTimeout(() => startCameraScanning(true), 500)
+          setTimeout(() => startCameraScanning(nextMode), 600)
           return
         }
-        errorMessage = "Camera is already in use or could not start. Try Safari, or close other apps using the camera."
+        errorMessage = "Camera could not start. Try Safari, or close other apps using the camera."
       } else if (err.name === "OverconstrainedError") {
         errorMessage = "Camera constraints not supported. Trying with default settings..."
         // Retry with front camera (simpler constraints) - helps Chrome
-        if (isChrome && !retryWithUserFacing) {
-          setTimeout(() => startCameraScanning(true), 1000)
+        if (isChrome && retryMode === "default") {
+          setTimeout(() => startCameraScanning("userFacing"), 1000)
+        } else if (retryMode === "userFacing") {
+          setTimeout(() => startCameraScanning("constraintsOnly"), 1000)
         } else {
           setTimeout(() => startCameraScanning(), 1000)
         }
