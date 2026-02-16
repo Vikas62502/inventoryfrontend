@@ -98,6 +98,7 @@ export default function ProductModal({ product, onClose, onSave }: ProductModalP
   // Camera barcode scanning
   const [isScanning, setIsScanning] = useState(false)
   const [scanError, setScanError] = useState<string | null>(null)
+  const [preferBackCamera, setPreferBackCamera] = useState(true) // Back camera preferred for barcode scanning
   const qrCodeScannerRef = useRef<Html5Qrcode | null>(null)
   const scannerElementId = "barcode-scanner"
   const scannerElementIdEdit = "barcode-scanner-edit"
@@ -420,37 +421,32 @@ export default function ProductModal({ product, onClose, onSave }: ProductModalP
       }
       
       // Determine camera configuration
-      // Chrome: use "user" (front) camera by default - Chrome has known issues with "environment" (back)
+      // preferBackCamera = back (environment) for barcode scanning; userFacing retry = front (user)
       let cameraConfig: string | { facingMode: string }
+      const useBack = preferBackCamera && retryMode !== "userFacing" && retryMode !== "constraintsOnly"
       
       if (cameras.length > 0) {
-        if (isChrome && retryMode !== "constraintsOnly") {
-          // Chrome: use facingMode instead of deviceId (more reliable, avoids auto-stop)
+        if (retryMode === "userFacing" || retryMode === "constraintsOnly") {
           cameraConfig = { facingMode: "user" }
-        } else if (retryMode === "userFacing") {
-          const frontCamera = cameras.find(cam => 
-            cam.label.toLowerCase().includes("front") || 
-            cam.label.toLowerCase().includes("user") ||
-            cam.label.toLowerCase().includes("face")
-          )
-          cameraConfig = frontCamera ? frontCamera.id : cameras[0].id
-        } else {
-          // Safari/Firefox: prefer back camera for mobile scanning
+        } else if (useBack) {
+          // Try back camera first (preferred for barcode scanning)
           const backCamera = cameras.find(cam => 
             cam.label.toLowerCase().includes("back") || 
             cam.label.toLowerCase().includes("rear") ||
             cam.label.toLowerCase().includes("environment")
           )
-          cameraConfig = backCamera ? backCamera.id : cameras[0].id
+          cameraConfig = backCamera ? backCamera.id : { facingMode: "environment" }
+        } else {
+          // Front camera
+          const frontCamera = cameras.find(cam => 
+            cam.label.toLowerCase().includes("front") || 
+            cam.label.toLowerCase().includes("user") ||
+            cam.label.toLowerCase().includes("face")
+          )
+          cameraConfig = frontCamera ? frontCamera.id : { facingMode: "user" }
         }
       } else {
-        // Fallback to facingMode when enumeration fails
-        cameraConfig = (isChrome || retryMode !== "default") ? { facingMode: "user" } : { facingMode: "environment" }
-      }
-      
-      // constraintsOnly retry: use simplest config - facingMode only
-      if (retryMode === "constraintsOnly") {
-        cameraConfig = { facingMode: "user" }
+        cameraConfig = useBack ? { facingMode: "environment" } : { facingMode: "user" }
       }
       
       // Calculate qrbox size based on screen size (mobile-friendly)
@@ -519,10 +515,11 @@ export default function ProductModal({ product, onClose, onSave }: ProductModalP
       } else if (err.name === "NotFoundError" || err.name === "DevicesNotFoundError") {
         errorMessage = "No camera found. Please connect a camera device."
       } else if (err.name === "NotReadableError" || err.name === "TrackStartError") {
-        // Chrome: retry with simpler config (front camera, then constraints-only)
-        if (isChrome && retryMode !== "constraintsOnly") {
+        // Back camera failed - retry with front camera
+        if (retryMode !== "constraintsOnly") {
           const nextMode = retryMode === "default" ? "userFacing" : "constraintsOnly"
-          console.log("Chrome NotReadableError - retrying with", nextMode)
+          console.log("Camera error - retrying with", nextMode)
+          if (retryMode === "default") setPreferBackCamera(false) // Now using front
           if (qrCodeScannerRef.current) {
             try { await qrCodeScannerRef.current.stop() } catch (_) {}
             try { await qrCodeScannerRef.current.clear() } catch (_) {}
@@ -564,6 +561,18 @@ export default function ProductModal({ product, onClose, onSave }: ProductModalP
         qrCodeScannerRef.current = null
       }
     }
+  }
+
+  const switchCamera = async () => {
+    if (!qrCodeScannerRef.current) return
+    try {
+      await qrCodeScannerRef.current.stop()
+      await qrCodeScannerRef.current.clear()
+      qrCodeScannerRef.current = null
+    } catch (_) {}
+    setPreferBackCamera(prev => !prev)
+    setScanError(null)
+    setTimeout(() => startCameraScanning(), 400)
   }
 
   const stopCameraScanning = async () => {
@@ -1028,14 +1037,25 @@ Example: SN001, SN002, SN003"
                           Start Camera
                         </button>
                       ) : (
-                        <button
-                          type="button"
-                          onClick={stopCameraScanning}
-                          className="flex items-center gap-2 px-3 py-1.5 bg-red-600 hover:bg-red-700 text-white rounded-lg transition text-sm"
-                        >
-                          <CameraOff className="w-4 h-4" />
-                          Stop Camera
-                        </button>
+                        <>
+                          <button
+                            type="button"
+                            onClick={switchCamera}
+                            className="flex items-center gap-2 px-3 py-1.5 bg-slate-600 hover:bg-slate-500 text-white rounded-lg transition text-sm"
+                            title={preferBackCamera ? "Switch to front camera" : "Switch to back camera"}
+                          >
+                            <Camera className="w-4 h-4" />
+                            {preferBackCamera ? "Front" : "Back"}
+                          </button>
+                          <button
+                            type="button"
+                            onClick={stopCameraScanning}
+                            className="flex items-center gap-2 px-3 py-1.5 bg-red-600 hover:bg-red-700 text-white rounded-lg transition text-sm"
+                          >
+                            <CameraOff className="w-4 h-4" />
+                            Stop Camera
+                          </button>
+                        </>
                       )}
                     </div>
                     
@@ -1803,14 +1823,25 @@ Example: SN001, SN002, SN003"
                               Start Camera
                             </button>
                           ) : (
-                            <button
-                              type="button"
-                              onClick={stopCameraScanning}
-                              className="flex items-center gap-2 px-3 py-1.5 bg-red-600 hover:bg-red-700 text-white rounded-lg transition text-sm"
-                            >
-                              <CameraOff className="w-4 h-4" />
-                              Stop Camera
-                            </button>
+                            <>
+                              <button
+                                type="button"
+                                onClick={switchCamera}
+                                className="flex items-center gap-2 px-3 py-1.5 bg-slate-600 hover:bg-slate-500 text-white rounded-lg transition text-sm"
+                                title={preferBackCamera ? "Switch to front camera" : "Switch to back camera"}
+                              >
+                                <Camera className="w-4 h-4" />
+                                {preferBackCamera ? "Front" : "Back"}
+                              </button>
+                              <button
+                                type="button"
+                                onClick={stopCameraScanning}
+                                className="flex items-center gap-2 px-3 py-1.5 bg-red-600 hover:bg-red-700 text-white rounded-lg transition text-sm"
+                              >
+                                <CameraOff className="w-4 h-4" />
+                                Stop Camera
+                              </button>
+                            </>
                           )}
                         </div>
                         
