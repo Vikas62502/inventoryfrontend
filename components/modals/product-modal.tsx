@@ -404,19 +404,9 @@ export default function ProductModal({ product, onClose, onSave }: ProductModalP
       
       console.log("Using scanner ID:", scannerId)
       
-      // Wait for DOM to be ready (Chrome needs extra time for camera init)
-      await new Promise(resolve => setTimeout(resolve, isMobile ? 600 : isChrome ? 500 : 300))
-      
-      // Chrome: preflight - request camera with simplest constraints first (helps Chrome initialize)
-      if (isChrome && navigator.mediaDevices?.getUserMedia) {
-        try {
-          const testStream = await navigator.mediaDevices.getUserMedia({ video: true })
-          testStream.getTracks().forEach(t => t.stop())
-          await new Promise(resolve => setTimeout(resolve, 150))
-        } catch (preflightErr) {
-          console.debug("Chrome camera preflight failed:", preflightErr)
-        }
-      }
+      // Wait for DOM to be ready - Chrome needs extra time to avoid auto-stop
+      await new Promise(resolve => setTimeout(resolve, isMobile ? 700 : isChrome ? 600 : 300))
+      await new Promise(resolve => requestAnimationFrame(resolve))
       
       const html5QrCode = new Html5Qrcode(scannerId)
       qrCodeScannerRef.current = html5QrCode
@@ -434,16 +424,9 @@ export default function ProductModal({ product, onClose, onSave }: ProductModalP
       let cameraConfig: string | { facingMode: string }
       
       if (cameras.length > 0) {
-        if (isChrome) {
-          // Chrome: prefer front camera or first available (more reliable than back camera)
-          const frontCamera = cameras.find(cam => 
-            cam.label.toLowerCase().includes("front") || 
-            cam.label.toLowerCase().includes("user") ||
-            cam.label.toLowerCase().includes("face") ||
-            cam.label.toLowerCase().includes("integrated") ||
-            cam.label.toLowerCase().includes("built-in")
-          )
-          cameraConfig = frontCamera ? frontCamera.id : cameras[0].id
+        if (isChrome && retryMode !== "constraintsOnly") {
+          // Chrome: use facingMode instead of deviceId (more reliable, avoids auto-stop)
+          cameraConfig = { facingMode: "user" }
         } else if (retryMode === "userFacing") {
           const frontCamera = cameras.find(cam => 
             cam.label.toLowerCase().includes("front") || 
@@ -465,14 +448,9 @@ export default function ProductModal({ product, onClose, onSave }: ProductModalP
         cameraConfig = (isChrome || retryMode !== "default") ? { facingMode: "user" } : { facingMode: "environment" }
       }
       
-      // constraintsOnly retry: use simplest config - facingMode only, no deviceId
+      // constraintsOnly retry: use simplest config - facingMode only
       if (retryMode === "constraintsOnly") {
         cameraConfig = { facingMode: "user" }
-      }
-      
-      // Chrome desktop: when no cameras enumerated, use first available or simplest
-      if (isChrome && !isMobile && cameras.length > 0 && retryMode === "constraintsOnly") {
-        cameraConfig = cameras[0].id // First camera often works when facingMode fails
       }
       
       // Calculate qrbox size based on screen size (mobile-friendly)
@@ -488,10 +466,6 @@ export default function ProductModal({ product, onClose, onSave }: ProductModalP
         qrbox: { width: qrboxSize, height: qrboxSize },
         aspectRatio: 1.0,
         disableFlip: false,
-      }
-      // Chrome / constraintsOnly retry: explicit videoConstraints for better compatibility
-      if ((isChrome || retryMode === "constraintsOnly") && typeof cameraConfig === "object") {
-        scanConfig.videoConstraints = { facingMode: cameraConfig.facingMode || "user" }
       }
       
       await html5QrCode.start(
@@ -541,7 +515,7 @@ export default function ProductModal({ product, onClose, onSave }: ProductModalP
       
       // Handle specific error types
       if (err.name === "NotAllowedError" || err.name === "PermissionDeniedError") {
-        errorMessage = "Camera permission denied. Please allow camera access when prompted, or check your browser settings."
+        errorMessage = "Camera permission denied. Please allow camera access when the browser asks, or enable it in your browser settings (e.g. Chrome: site settings → Camera → Allow)."
       } else if (err.name === "NotFoundError" || err.name === "DevicesNotFoundError") {
         errorMessage = "No camera found. Please connect a camera device."
       } else if (err.name === "NotReadableError" || err.name === "TrackStartError") {
@@ -1084,7 +1058,7 @@ Example: SN001, SN002, SN003"
                               <p className="font-medium">Camera Error:</p>
                               <p>{scanError}</p>
                               <p className="mt-1 text-red-300 text-[10px] whitespace-pre-line">
-                                {scanError.includes("permission") && "• Allow camera access when prompted\n• Or go to browser settings → Site settings → Camera → Allow"}
+                                {(scanError.includes("permission") || scanError.includes("denied")) && "• Click Allow when the browser asks for camera access\n• Or go to browser settings → Site settings → Camera → Allow"}
                                 {scanError.includes("HTTPS") && "• Please access this page via HTTPS or localhost"}
                                 {(scanError.includes("in use") || scanError.includes("could not start")) && "• Close other apps using the camera\n• Try Safari if Chrome doesn't work\n• Refresh the page and try again"}
                               </p>
@@ -1859,7 +1833,7 @@ Example: SN001, SN002, SN003"
                                   <p className="font-medium">Camera Error:</p>
                                   <p>{scanError}</p>
                                   <p className="mt-1 text-red-300 text-[10px] whitespace-pre-line">
-                                    {scanError.includes("permission") && "• Allow camera access when prompted\n• Or go to browser settings → Site settings → Camera → Allow"}
+                                    {(scanError.includes("permission") || scanError.includes("denied")) && "• Click Allow when the browser asks for camera access\n• Or go to browser settings → Site settings → Camera → Allow"}
                                     {scanError.includes("HTTPS") && "• Please access this page via HTTPS or localhost"}
                                     {(scanError.includes("in use") || scanError.includes("could not start")) && "• Close other apps using the camera\n• Try Safari if Chrome doesn't work\n• Refresh the page and try again"}
                                   </p>
