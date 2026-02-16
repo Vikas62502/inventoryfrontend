@@ -100,6 +100,7 @@ export default function ProductModal({ product, onClose, onSave }: ProductModalP
   const [scanError, setScanError] = useState<string | null>(null)
   const [preferBackCamera, setPreferBackCamera] = useState(true) // Back camera preferred for barcode scanning
   const qrCodeScannerRef = useRef<Html5Qrcode | null>(null)
+  const scanStartTimeRef = useRef<number>(0) // Ignore false-positive scans in first ~1.5s
   const scannerElementId = "barcode-scanner"
   const scannerElementIdEdit = "barcode-scanner-edit"
   
@@ -405,8 +406,17 @@ export default function ProductModal({ product, onClose, onSave }: ProductModalP
       
       console.log("Using scanner ID:", scannerId)
       
-      // Wait for DOM to be ready - Chrome needs extra time to avoid auto-stop
-      await new Promise(resolve => setTimeout(resolve, isMobile && isChrome ? 900 : isMobile ? 700 : isChrome ? 600 : 300))
+      // Chrome: div must be visible with dimensions BEFORE start, or stream auto-stops
+      const scannerEl = document.getElementById(scannerId)
+      if (scannerEl) {
+        scannerEl.style.display = "block"
+        scannerEl.style.minHeight = "250px"
+        scannerEl.style.visibility = "visible"
+      }
+      
+      // Wait for DOM/layout - Chrome needs time for video element to render properly
+      await new Promise(resolve => setTimeout(resolve, isMobile && isChrome ? 1000 : isMobile ? 800 : isChrome ? 700 : 400))
+      await new Promise(resolve => requestAnimationFrame(resolve))
       await new Promise(resolve => requestAnimationFrame(resolve))
       
       const html5QrCode = new Html5Qrcode(scannerId)
@@ -479,14 +489,19 @@ export default function ProductModal({ product, onClose, onSave }: ProductModalP
         disableFlip: false,
       }
       
+      // Ignore false-positive scans in first 1.5s (Chrome can fire callback from noise/first frame)
+      scanStartTimeRef.current = Date.now()
+      
       await html5QrCode.start(
         cameraConfig,
         scanConfig,
         async (decodedText) => {
-          // Successfully scanned - stop immediately to prevent multiple scans
           const newSerial = decodedText.trim()
+          // Guard: ignore scans within 800ms of start (Chrome false positives from first frame)
+          if (Date.now() - scanStartTimeRef.current < 800) return
+          if (!newSerial || newSerial.length < 2) return
           
-          // Stop scanner first to prevent multiple scans
+          // Successfully scanned - stop immediately to prevent multiple scans
           try {
             if (qrCodeScannerRef.current) {
               await qrCodeScannerRef.current.stop()
