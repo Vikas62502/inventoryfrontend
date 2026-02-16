@@ -116,6 +116,7 @@ See **BACKEND_CHANGES_COST_PRICE_SELLING_PRICE_SERIALS.md** (Section 4) for deta
 
 | Document | Purpose |
 |----------|---------|
+| **BACKEND_CHANGES_REQUIRED.md** | **Consolidated changes** – product map, serial numbers, selling price, stock |
 | **BACKEND_FIX_SERIAL_NUMBERS_NOT_SHOWING.md** | Step-by-step fix for serial numbers not appearing |
 | **BACKEND_CHANGES_FRONTEND_UPDATES.md** | Frontend behavior and payload examples |
 | **BACKEND_CHANGES_LATEST.md** | Overall checklist and metadata requirements |

@@ -3,7 +3,7 @@
 import { useState, useEffect, useCallback } from "react"
 import { Card } from "@/components/ui/card"
 import { Button } from "@/components/ui/button"
-import { Plus, Edit2, Trash2, Package, Search, TrendingUp, AlertCircle, Loader2, UserPlus, Users, CheckCircle, XCircle, RotateCcw, DollarSign } from "lucide-react"
+import { Plus, Edit2, Trash2, Package, Search, TrendingUp, AlertCircle, Loader2, UserPlus, Users, CheckCircle, XCircle, RotateCcw, DollarSign, Eye } from "lucide-react"
 import ProductModal from "@/components/modals/product-modal"
 import EnhancedRequestApprovalModal from "@/components/modals/enhanced-request-approval-modal"
 import CreateUserModal from "@/components/modals/create-user-modal"
@@ -31,6 +31,7 @@ export default function SuperAdminDashboard({ userName }: SuperAdminDashboardPro
   }
   
   const [showProductModal, setShowProductModal] = useState(false)
+  const [openSerialNumbersOnMount, setOpenSerialNumbersOnMount] = useState(false)
   const [recentlyCreatedSerials, setRecentlyCreatedSerials] = useState<Record<string, string[]>>({})
   const [showApprovalModal, setShowApprovalModal] = useState(false)
   const [showCreateUserModal, setShowCreateUserModal] = useState(false)
@@ -575,6 +576,7 @@ export default function SuperAdminDashboard({ userName }: SuperAdminDashboardPro
             <Button
               onClick={() => {
                 setEditingProduct(null)
+                setOpenSerialNumbersOnMount(false)
                 setShowProductModal(true)
               }}
               className="bg-blue-600 hover:bg-blue-700 text-white hover:text-slate-100 text-xs sm:text-sm px-2 sm:px-4 py-1.5 sm:py-2"
@@ -641,6 +643,7 @@ export default function SuperAdminDashboard({ userName }: SuperAdminDashboardPro
                         <Button
                           onClick={() => {
                             setEditingProduct(product as Product)
+                            setOpenSerialNumbersOnMount(false)
                             setShowProductModal(true)
                           }}
                           size="sm"
@@ -1248,17 +1251,34 @@ export default function SuperAdminDashboard({ userName }: SuperAdminDashboardPro
                           <span className="text-slate-400">Selling Price: <span className="text-emerald-400 font-medium">₹{((product as Product).selling_price ?? (product as Product).unit_price ?? (product as Product).price ?? 0).toLocaleString()}</span></span>
                         </div>
                       </div>
-                      <Button
-                        onClick={() => {
-                          setEditingProduct(product as Product)
-                          setShowProductModal(true)
-                        }}
-                        size="sm"
-                        className="bg-emerald-600 hover:bg-emerald-700 text-white flex-shrink-0"
-                      >
-                        <DollarSign className="w-4 h-4 mr-1" />
-                        Set Price
-                      </Button>
+                      <div className="flex gap-2 flex-shrink-0">
+                        <Button
+                          type="button"
+                          onClick={() => {
+                            setEditingProduct(product as Product)
+                            setOpenSerialNumbersOnMount(true)
+                            setShowProductModal(true)
+                          }}
+                          size="sm"
+                          variant="outline"
+                          className="border-slate-600 text-slate-300"
+                          title="View serial numbers for this product"
+                        >
+                          <Eye className="w-4 h-4" />
+                        </Button>
+                        <Button
+                          onClick={() => {
+                            setEditingProduct(product as Product)
+                            setOpenSerialNumbersOnMount(false)
+                            setShowProductModal(true)
+                          }}
+                          size="sm"
+                          className="bg-emerald-600 hover:bg-emerald-700 text-white"
+                        >
+                          <DollarSign className="w-4 h-4 mr-1" />
+                          Set Price
+                        </Button>
+                      </div>
                     </div>
                   </Card>
                 ))
@@ -1758,8 +1778,10 @@ export default function SuperAdminDashboard({ userName }: SuperAdminDashboardPro
           onClose={() => {
             setShowProductModal(false)
             setEditingProduct(null)
+            setOpenSerialNumbersOnMount(false)
           }}
           onSave={handleAddProduct}
+          openSerialNumbersOnMount={openSerialNumbersOnMount}
         />
       )}
 
