@@ -98,7 +98,9 @@ export default function ProductModal({ product, onClose, onSave }: ProductModalP
   // Camera barcode scanning
   const [isScanning, setIsScanning] = useState(false)
   const [scanError, setScanError] = useState<string | null>(null)
-  const [preferBackCamera, setPreferBackCamera] = useState(true) // Back camera preferred for barcode scanning
+  // Chrome: default to front camera - back camera often causes auto-stop; user can switch
+  const isChromeForCamera = typeof navigator !== "undefined" && /Chrome/i.test(navigator.userAgent) && !/Edge|Edg|OPR/i.test(navigator.userAgent)
+  const [preferBackCamera, setPreferBackCamera] = useState(!isChromeForCamera)
   const qrCodeScannerRef = useRef<Html5Qrcode | null>(null)
   const scanStartTimeRef = useRef<number>(0) // Ignore false-positive scans in first ~1.5s
   const scannerElementId = "barcode-scanner"
@@ -412,10 +414,12 @@ export default function ProductModal({ product, onClose, onSave }: ProductModalP
         scannerEl.style.display = "block"
         scannerEl.style.minHeight = "250px"
         scannerEl.style.visibility = "visible"
+        // Chrome: scroll into view so video is in viewport (Chrome suspends off-screen streams)
+        scannerEl.scrollIntoView({ behavior: "instant", block: "center" })
       }
       
-      // Wait for DOM/layout - Chrome needs time for video element to render properly
-      await new Promise(resolve => setTimeout(resolve, isMobile && isChrome ? 1000 : isMobile ? 800 : isChrome ? 700 : 400))
+      // Wait for DOM/layout - Chrome needs more time for video element to render
+      await new Promise(resolve => setTimeout(resolve, isChrome ? 1200 : isMobile ? 800 : 400))
       await new Promise(resolve => requestAnimationFrame(resolve))
       await new Promise(resolve => requestAnimationFrame(resolve))
       
@@ -481,11 +485,11 @@ export default function ProductModal({ product, onClose, onSave }: ProductModalP
         ? Math.min(screenWidth * 0.8, screenHeight * 0.4, 300) // 80% of width or 40% of height, max 300px
         : 250 // Desktop default
       
-      // Scan config - Chrome: use simpler constraints and lower FPS for stability
+      // Scan config - Chrome: no qrbox (full scan area), 4:3 aspect ratio, lower FPS for stability
       const scanConfig: any = {
         fps: isChrome ? (isMobile ? 3 : 5) : (isMobile ? 5 : 10),
-        qrbox: { width: qrboxSize, height: qrboxSize },
-        aspectRatio: 1.0,
+        qrbox: isChrome ? undefined : { width: qrboxSize, height: qrboxSize }, // Chrome: no qrbox - can cause stream to stop
+        aspectRatio: isChrome ? 1.333 : 1.0, // 4:3 more stable in Chrome
         disableFlip: false,
       }
       
