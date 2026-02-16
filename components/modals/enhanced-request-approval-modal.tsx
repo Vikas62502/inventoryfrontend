@@ -270,9 +270,9 @@ export default function EnhancedRequestApprovalModal({
                         <div key={index} className="p-3 bg-slate-600/50 rounded gap-3 space-y-3">
                           <div className="flex justify-between items-center">
                             <div className="flex-1 min-w-0">
-                              <p className="text-white font-medium">
-                                {productName} {productModel && `- ${productModel}`}
-                              </p>
+                            <p className="text-white font-medium">
+                              {productName} {productModel && `- ${productModel}`}
+                            </p>
                               <p className="text-slate-400 text-xs mt-1">My Stock: {adminStock} units</p>
                               {isModified && (
                                 <p className="text-amber-400 text-xs mt-1">

@@ -83,6 +83,7 @@ export interface Product {
   category: string
   wattage?: string
   unit_price: number
+  selling_price?: number // Super Admin: explicit selling price (default = max cost from stock)
   central_stock?: number
   distributed_stock?: number
   total_stock?: number
@@ -91,6 +92,8 @@ export interface Product {
   image?: string
   created_at?: string
   updated_at?: string
+  serial_numbers?: string[] // May be returned by backend after create/update
+  unit?: string
 }
 
 export interface ProductInventoryLevel {
@@ -124,7 +127,13 @@ export const productsApi = {
       wattage?: string
       quantity: number
       unit_price: number
+      unit?: string
       image?: File
+      serial_numbers?: string[]
+      default_price?: number
+      serial_number_prices?: Record<string, number>
+      product_name?: string
+      product_category?: string
     }
   ): Promise<Product> {
     const formData = new FormData()
@@ -134,7 +143,29 @@ export const productsApi = {
     if (product.wattage) formData.append("wattage", product.wattage)
     formData.append("quantity", (product.quantity ?? 0).toString())
     formData.append("unit_price", (product.unit_price ?? 0).toString())
+    if (product.unit) formData.append("unit", product.unit)
     if (product.image) formData.append("image", product.image)
+    
+    // Add serial numbers if provided
+    if (product.serial_numbers && Array.isArray(product.serial_numbers)) {
+      formData.append("serial_numbers", JSON.stringify(product.serial_numbers))
+    }
+    
+    // Add pricing for serial numbers
+    if (product.default_price !== undefined) {
+      formData.append("default_price", product.default_price.toString())
+    }
+    if (product.serial_number_prices) {
+      formData.append("serial_number_prices", JSON.stringify(product.serial_number_prices))
+    }
+    
+    // Add product metadata for serial number association
+    if (product.product_name) {
+      formData.append("product_name", product.product_name)
+    }
+    if (product.product_category) {
+      formData.append("product_category", product.product_category)
+    }
 
     return apiClient.post<Product>("/products", formData, true)
   },
@@ -145,10 +176,17 @@ export const productsApi = {
       image?: File
       serial_numbers?: string[]
       stock_to_add?: number
+      default_price?: number
+      serial_number_prices?: Record<string, number>
+      product_name?: string
+      product_category?: string
+      use_max_cost_price?: boolean
+      selling_price?: number
     }
   ): Promise<Product> {
-    // Use FormData if we have image, serial_numbers, or stock_to_add
-    if (updates.image || updates.serial_numbers || updates.stock_to_add !== undefined) {
+    // Use FormData if we have image, serial_numbers, stock_to_add, or pricing fields
+    if (updates.image || updates.serial_numbers || updates.stock_to_add !== undefined || 
+        updates.default_price !== undefined || updates.serial_number_prices) {
       const formData = new FormData()
       
       // Handle image file
@@ -166,10 +204,37 @@ export const productsApi = {
         formData.append("stock_to_add", updates.stock_to_add.toString())
       }
       
+      // Handle pricing for serial numbers
+      if (updates.default_price !== undefined) {
+        formData.append("default_price", updates.default_price.toString())
+      }
+      if (updates.serial_number_prices) {
+        formData.append("serial_number_prices", JSON.stringify(updates.serial_number_prices))
+      }
+      
+      // Add product metadata for serial number association
+      if (updates.product_name) {
+        formData.append("product_name", updates.product_name)
+      }
+      if (updates.product_category) {
+        formData.append("product_category", updates.product_category)
+      }
+      
+      // Super Admin: selling price options
+      if (updates.use_max_cost_price !== undefined) {
+        formData.append("use_max_cost_price", String(updates.use_max_cost_price))
+      }
+      if (updates.selling_price !== undefined && updates.selling_price > 0) {
+        formData.append("selling_price", updates.selling_price.toString())
+      }
+      
       // Handle other fields
       Object.keys(updates).forEach((key) => {
         const value = updates[key as keyof typeof updates]
-        if (key !== "image" && key !== "serial_numbers" && key !== "stock_to_add" && value !== undefined) {
+        if (key !== "image" && key !== "serial_numbers" && key !== "stock_to_add" && 
+            key !== "default_price" && key !== "serial_number_prices" && 
+            key !== "product_name" && key !== "product_category" &&
+            key !== "use_max_cost_price" && key !== "selling_price" && value !== undefined) {
           formData.append(key, typeof value === "object" ? JSON.stringify(value) : String(value))
         }
       })
@@ -191,6 +256,10 @@ export interface SerialNumber {
   serial_number: string
   created_at?: string
   updated_at?: string
+  cost_price?: number
+  product_name?: string
+  category?: string
+  status?: string
 }
 
 export interface SerialNumberSearchResult {

@@ -57,21 +57,21 @@ export default function AdminDashboard({ userName }: AdminDashboardProps) {
 
   // Load agents created by this admin
   // Backend automatically filters - admins only receive agents they created
-  const loadMyAgents = async () => {
-    if (!currentUserId) return
-    try {
-      setLoadingAgents(true)
-      // Backend filters agents - admins only see agents they created
-      const myAgentsList = await usersApi.getAll("agent")
-      setMyAgents(myAgentsList)
-    } catch (err) {
-      console.error("Failed to load agents:", err)
-      // On error, set empty array to avoid showing all agents
-      setMyAgents([])
-    } finally {
-      setLoadingAgents(false)
+    const loadMyAgents = async () => {
+      if (!currentUserId) return
+      try {
+        setLoadingAgents(true)
+        // Backend filters agents - admins only see agents they created
+        const myAgentsList = await usersApi.getAll("agent")
+        setMyAgents(myAgentsList)
+      } catch (err) {
+        console.error("Failed to load agents:", err)
+        // On error, set empty array to avoid showing all agents
+        setMyAgents([])
+      } finally {
+        setLoadingAgents(false)
+      }
     }
-  }
 
   useEffect(() => {
     loadMyAgents()
@@ -507,7 +507,7 @@ export default function AdminDashboard({ userName }: AdminDashboardProps) {
               className="border-blue-600 text-blue-400 hover:bg-blue-950 text-sm w-full"
               size="sm"
             >
-              <Plus className="w-4 h-4 mr-2" />
+            <Plus className="w-4 h-4 mr-2" />
               Transfer Stock
             </Button>
             <Button
@@ -695,7 +695,7 @@ export default function AdminDashboard({ userName }: AdminDashboardProps) {
                           {formatDateISO(request.requested_date || request.created_at)}
                         </p>
                       </div>
-                    </div>
+        </div>
 
                     <div className="pt-2 border-t border-slate-700">
                       {isMyRequest && request.status === "dispatched" && (
@@ -1080,7 +1080,7 @@ export default function AdminDashboard({ userName }: AdminDashboardProps) {
                 })()}
               </>
             )}
-          </div>
+      </div>
         </TabsContent>
 
         <TabsContent value="returns" className="mt-4">

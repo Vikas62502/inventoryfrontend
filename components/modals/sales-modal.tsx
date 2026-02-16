@@ -177,11 +177,11 @@ export default function SalesModal({ saleType, onClose, onSave, availableStock }
     const updated = [...items]
     updated[index] = { ...updated[index], [field]: value }
     
-    // Auto-fill unit price from product
+    // Auto-fill unit price from product (use selling_price for sales, else cost/unit_price)
     if (field === "product_id" && value) {
       const product = products.find(p => p.id === value)
       if (product) {
-        updated[index].unit_price = product.unit_price || product.price || 0
+        updated[index].unit_price = product.selling_price ?? product.unit_price ?? product.price ?? 0
       }
     }
     
@@ -404,7 +404,7 @@ export default function SalesModal({ saleType, onClose, onSave, availableStock }
           .join(", ")
         setError(detailMessage || err.message || "Failed to create sale")
       } else {
-        setError(err.message || "Failed to create sale")
+      setError(err.message || "Failed to create sale")
       }
       setIsSubmitting(false)
     }
@@ -606,15 +606,15 @@ export default function SalesModal({ saleType, onClose, onSave, availableStock }
 
                 <div>
                   <label className="block text-sm font-medium text-slate-300 mb-2">Customer Name *</label>
-                  <input
-                    type="text"
+            <input
+              type="text"
                     value={b2cFields.customer_name}
                     onChange={(e) => setB2cFields({ ...b2cFields, customer_name: e.target.value })}
                     className="w-full px-4 py-2 bg-slate-700 border border-slate-600 rounded-lg text-white focus:outline-none focus:border-blue-500"
-                    required
+              required
                     placeholder="Or enter manually"
-                  />
-                </div>
+            />
+          </div>
 
           <div>
                   <label className="block text-sm font-medium text-slate-300 mb-2">Phone *</label>
@@ -708,9 +708,9 @@ export default function SalesModal({ saleType, onClose, onSave, availableStock }
                         ? `${product.name} - ${product.model}`
                         : product.name
                       return (
-                        <option key={product.id} value={product.id}>
+                      <option key={product.id} value={product.id}>
                           {availableStock ? `${label} (Available: ${availableQty || 0} units)` : label}
-                        </option>
+                      </option>
                       )
                     })}
                   </select>

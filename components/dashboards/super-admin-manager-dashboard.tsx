@@ -17,6 +17,7 @@ export default function SuperAdminManagerDashboard({ userName }: SuperAdminManag
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
   const [showProductModal, setShowProductModal] = useState(false)
+  const [recentlyCreatedSerials, setRecentlyCreatedSerials] = useState<Record<string, string[]>>({})
   const [editingProduct, setEditingProduct] = useState<Product | null>(null)
   const [searchTerm, setSearchTerm] = useState("")
   const [categoryFilter, setCategoryFilter] = useState<string | null>(null)
@@ -92,6 +93,9 @@ export default function SuperAdminManagerDashboard({ userName }: SuperAdminManag
       setError(null)
       if ("id" in product) {
         await productsApi.update(product.id, product)
+        if ((product as Product).serial_numbers?.length) {
+          setRecentlyCreatedSerials((prev) => ({ ...prev, [product.id]: (product as Product).serial_numbers! }))
+        }
       } else {
         await productsApi.create(product)
       }
@@ -374,7 +378,14 @@ export default function SuperAdminManagerDashboard({ userName }: SuperAdminManag
       {/* Modals */}
       {showProductModal && (
         <ProductModal
-          product={editingProduct}
+          product={
+            editingProduct
+              ? {
+                  ...editingProduct,
+                  serial_numbers: editingProduct.serial_numbers ?? recentlyCreatedSerials[editingProduct.id],
+                }
+              : undefined
+          }
           onClose={() => {
             setShowProductModal(false)
             setEditingProduct(null)

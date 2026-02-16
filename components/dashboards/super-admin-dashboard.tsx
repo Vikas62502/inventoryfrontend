@@ -3,7 +3,7 @@
 import { useState, useEffect, useCallback } from "react"
 import { Card } from "@/components/ui/card"
 import { Button } from "@/components/ui/button"
-import { Plus, Edit2, Trash2, Package, Search, TrendingUp, AlertCircle, Loader2, UserPlus, Users, CheckCircle, XCircle, RotateCcw } from "lucide-react"
+import { Plus, Edit2, Trash2, Package, Search, TrendingUp, AlertCircle, Loader2, UserPlus, Users, CheckCircle, XCircle, RotateCcw, DollarSign } from "lucide-react"
 import ProductModal from "@/components/modals/product-modal"
 import EnhancedRequestApprovalModal from "@/components/modals/enhanced-request-approval-modal"
 import CreateUserModal from "@/components/modals/create-user-modal"
@@ -31,6 +31,7 @@ export default function SuperAdminDashboard({ userName }: SuperAdminDashboardPro
   }
   
   const [showProductModal, setShowProductModal] = useState(false)
+  const [recentlyCreatedSerials, setRecentlyCreatedSerials] = useState<Record<string, string[]>>({})
   const [showApprovalModal, setShowApprovalModal] = useState(false)
   const [showCreateUserModal, setShowCreateUserModal] = useState(false)
   const [createUserTargetRole, setCreateUserTargetRole] = useState<"admin" | "super-admin-manager">("admin")
@@ -354,6 +355,10 @@ export default function SuperAdminDashboard({ userName }: SuperAdminDashboardPro
     try {
       await inventory.addProduct(product as any)
       await inventory.refetch()
+      // Store serial numbers for products we just created (for View All fallback when backend has not synced yet)
+      if ("id" in product && product.id && (product as Product).serial_numbers?.length) {
+        setRecentlyCreatedSerials((prev) => ({ ...prev, [product.id]: (product as Product).serial_numbers! }))
+      }
       setShowProductModal(false)
       setEditingProduct(null)
     } catch (err) {
@@ -506,7 +511,7 @@ export default function SuperAdminDashboard({ userName }: SuperAdminDashboardPro
       {/* Tabs Navigation */}
       <Tabs value={activeTab} onValueChange={setActiveTab} className="w-full">
         <div className="w-full mb-6 sm:mb-8 bg-slate-900 rounded-lg p-1">
-          <TabsList className="bg-slate-900 border-0 p-0 w-full grid grid-cols-2 md:grid-cols-5 gap-2">
+          <TabsList className="bg-slate-900 border-0 p-0 w-full grid grid-cols-2 md:grid-cols-6 gap-2">
             <TabsTrigger value="overview" className="data-[state=active]:bg-blue-600 data-[state=active]:text-white text-slate-300 bg-slate-800 hover:bg-slate-700 text-[11px] sm:text-xs px-3 py-2 rounded-md transition-all flex items-center justify-center">
               <Package className="w-3.5 h-3.5 sm:w-4 sm:h-4 mr-1.5" />
               <span>Overview</span>
@@ -522,6 +527,10 @@ export default function SuperAdminDashboard({ userName }: SuperAdminDashboardPro
             <TabsTrigger value="returns" className="data-[state=active]:bg-orange-600 data-[state=active]:text-white text-slate-300 bg-slate-800 hover:bg-slate-700 text-[11px] sm:text-xs px-3 py-2 rounded-md transition-all flex items-center justify-center">
               <RotateCcw className="w-3.5 h-3.5 sm:w-4 sm:h-4 mr-1.5" />
               <span>Return Approvals</span>
+            </TabsTrigger>
+            <TabsTrigger value="selling-price" className="data-[state=active]:bg-emerald-600 data-[state=active]:text-white text-slate-300 bg-slate-800 hover:bg-slate-700 text-[11px] sm:text-xs px-3 py-2 rounded-md transition-all flex items-center justify-center">
+              <DollarSign className="w-3.5 h-3.5 sm:w-4 sm:h-4 mr-1.5" />
+              <span>Set Selling Price</span>
             </TabsTrigger>
             <TabsTrigger value="users" className="data-[state=active]:bg-purple-600 data-[state=active]:text-white text-slate-300 bg-slate-800 hover:bg-slate-700 text-[11px] sm:text-xs px-3 py-2 rounded-md transition-all flex items-center justify-center">
               <UserPlus className="w-3.5 h-3.5 sm:w-4 sm:h-4 mr-1.5" />
@@ -1193,6 +1202,75 @@ export default function SuperAdminDashboard({ userName }: SuperAdminDashboardPro
           )}
         </TabsContent>
 
+        <TabsContent value="selling-price" className="mt-[60px] md:mt-0 space-y-6">
+          <div className="space-y-4">
+            <h2 className="text-xl font-bold text-white flex items-center gap-2">
+              <DollarSign className="w-5 h-5 text-emerald-500" />
+              Set Selling Price
+            </h2>
+            <p className="text-slate-400 text-sm">
+              Set the selling price for each product. By default, the max cost price from registered stock is used. You can override with a custom price per product.
+            </p>
+            <div className="flex flex-col sm:flex-row gap-2">
+              <div className="flex-1 relative">
+                <Search className="w-4 h-4 absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" />
+                <input
+                  type="text"
+                  placeholder="Search products..."
+                  value={searchTerm}
+                  onChange={(e) => setSearchTerm(e.target.value)}
+                  className="w-full pl-10 pr-4 py-2 bg-slate-700 border border-slate-600 rounded-lg text-white placeholder-slate-500 focus:outline-none focus:border-blue-500"
+                />
+              </div>
+              <select
+                value={categoryFilter || ""}
+                onChange={(e) => setCategoryFilter(e.target.value || null)}
+                className="w-full sm:w-auto px-4 py-2 bg-slate-700 border border-slate-600 rounded-lg text-white focus:outline-none focus:border-blue-500"
+              >
+                <option value="">All Categories</option>
+                {categories.map((cat, index) => (
+                  <option key={`sp-${cat}-${index}`} value={cat}>
+                    {cat}
+                  </option>
+                ))}
+              </select>
+            </div>
+            <div className="space-y-3 max-h-[600px] overflow-y-auto pr-1">
+              {filteredProducts.length > 0 ? (
+                filteredProducts.map((product) => (
+                  <Card key={product.id} className="bg-slate-800 border-slate-700 p-3 sm:p-4">
+                    <div className="flex flex-col sm:flex-row items-start justify-between gap-3">
+                      <div className="flex-1 min-w-0">
+                        <h3 className="font-semibold text-white mb-1 truncate text-sm sm:text-base">{product.name}</h3>
+                        <div className="flex flex-wrap gap-3 text-xs sm:text-sm">
+                          <span className="text-slate-400">Category: <span className="text-white">{product.category}</span></span>
+                          <span className="text-slate-400">Stock: <span className="text-cyan-400 font-medium">{product.quantity || 0}</span></span>
+                          <span className="text-slate-400">Selling Price: <span className="text-emerald-400 font-medium">₹{((product as Product).selling_price ?? (product as Product).unit_price ?? (product as Product).price ?? 0).toLocaleString()}</span></span>
+                        </div>
+                      </div>
+                      <Button
+                        onClick={() => {
+                          setEditingProduct(product as Product)
+                          setShowProductModal(true)
+                        }}
+                        size="sm"
+                        className="bg-emerald-600 hover:bg-emerald-700 text-white flex-shrink-0"
+                      >
+                        <DollarSign className="w-4 h-4 mr-1" />
+                        Set Price
+                      </Button>
+                    </div>
+                  </Card>
+                ))
+              ) : (
+                <Card className="bg-slate-800 border-slate-700 p-4 sm:p-6 text-center">
+                  <p className="text-slate-400 text-sm sm:text-base">No products found</p>
+                </Card>
+              )}
+            </div>
+          </div>
+        </TabsContent>
+
         <TabsContent value="users" className="mt-[60px] md:mt-0">
           <div className="space-y-6">
             <div className="flex items-center justify-between flex-wrap gap-4">
@@ -1669,7 +1747,14 @@ export default function SuperAdminDashboard({ userName }: SuperAdminDashboardPro
       {/* Modals */}
       {showProductModal && (
         <ProductModal
-          product={editingProduct}
+          product={
+            editingProduct
+              ? {
+                  ...editingProduct,
+                  serial_numbers: editingProduct.serial_numbers ?? recentlyCreatedSerials[editingProduct.id],
+                }
+              : undefined
+          }
           onClose={() => {
             setShowProductModal(false)
             setEditingProduct(null)

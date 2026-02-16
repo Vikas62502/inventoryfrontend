@@ -87,7 +87,7 @@ export default function AgentStockRequestModal({ onClose, onSuccess }: AgentStoc
       setError("Please add at least one product")
       return
     }
-
+    
     // Validate each item
     for (const item of items) {
       if (!item.product_id || item.quantity <= 0) {
@@ -210,18 +210,18 @@ export default function AgentStockRequestModal({ onClose, onSuccess }: AgentStoc
                 Add Product
               </Button>
             </div>
-
+            
             <div className="space-y-3">
               {items.map((item, index) => (
                 <div key={index} className="flex gap-2 items-center">
                   <div className="flex-1 min-w-0">
-                    <select
-                      value={item.product_id}
-                      onChange={(e) => updateItem(index, "product_id", e.target.value)}
+                  <select
+                    value={item.product_id}
+                    onChange={(e) => updateItem(index, "product_id", e.target.value)}
                       className="w-full px-3 py-2 bg-slate-700 border border-slate-600 rounded-lg text-white text-sm focus:outline-none focus:border-blue-500 h-10"
-                      required
-                    >
-                      <option value="">Select Product</option>
+                    required
+                  >
+                    <option value="">Select Product</option>
                       {products.map((product) => {
                         const inventoryItem = adminInventory.find(inv => inv.product_id === product.id)
                         const availableStock = inventoryItem?.quantity || 0
@@ -230,12 +230,12 @@ export default function AgentStockRequestModal({ onClose, onSuccess }: AgentStoc
                           ? `${product.name} - ${product.model}`
                           : product.name
                         return (
-                          <option key={product.id} value={product.id}>
+                      <option key={product.id} value={product.id}>
                             {productDisplay} (Available: {availableStock} units)
-                          </option>
+                      </option>
                         )
                       })}
-                    </select>
+                  </select>
                   </div>
                   
                   <div className="w-20 flex-shrink-0">

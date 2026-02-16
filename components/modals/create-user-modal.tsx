@@ -127,16 +127,16 @@ export default function CreateUserModal({
           <div>
             <label className="block text-sm font-medium text-slate-300 mb-2">Password *</label>
             <div className="relative">
-              <input
+            <input
                 type={showPassword ? "text" : "password"}
-                name="password"
-                value={formData.password}
-                onChange={handleChange}
+              name="password"
+              value={formData.password}
+              onChange={handleChange}
                 className="w-full px-4 py-2 pr-10 bg-slate-700 border border-slate-600 rounded-lg text-white focus:outline-none focus:border-blue-500"
-                placeholder="Enter password (min 6 characters)"
-                required
-                minLength={6}
-              />
+              placeholder="Enter password (min 6 characters)"
+              required
+              minLength={6}
+            />
               <button
                 type="button"
                 onClick={() => setShowPassword(!showPassword)}
@@ -150,15 +150,15 @@ export default function CreateUserModal({
           <div>
             <label className="block text-sm font-medium text-slate-300 mb-2">Confirm Password *</label>
             <div className="relative">
-              <input
+            <input
                 type={showConfirmPassword ? "text" : "password"}
-                name="confirmPassword"
-                value={formData.confirmPassword}
-                onChange={handleChange}
+              name="confirmPassword"
+              value={formData.confirmPassword}
+              onChange={handleChange}
                 className="w-full px-4 py-2 pr-10 bg-slate-700 border border-slate-600 rounded-lg text-white focus:outline-none focus:border-blue-500"
-                placeholder="Confirm password"
-                required
-              />
+              placeholder="Confirm password"
+              required
+            />
               <button
                 type="button"
                 onClick={() => setShowConfirmPassword(!showConfirmPassword)}

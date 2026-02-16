@@ -3,7 +3,8 @@
 import { useState, useEffect, useRef } from "react"
 import { Card } from "@/components/ui/card"
 import { Button } from "@/components/ui/button"
-import { X, Loader2, AlertCircle, Eye, Camera, CameraOff } from "lucide-react"
+import { Checkbox } from "@/components/ui/checkbox"
+import { X, Loader2, AlertCircle, Eye, Camera, CameraOff, DollarSign, ChevronDown, ChevronUp } from "lucide-react"
 import { Html5Qrcode } from "html5-qrcode"
 import { productsApi, categoriesApi, serialNumbersApi, type SerialNumber } from "@/lib/api"
 import type { Product } from "@/lib/api"
@@ -28,9 +29,10 @@ export default function ProductModal({ product, onClose, onSave }: ProductModalP
   const [isAddingCategory, setIsAddingCategory] = useState(false)
   const [showProductDropdown, setShowProductDropdown] = useState(false)
   
-  // Check if user is agent (only agents can set price)
+  // Check if user is agent (only agents can set price) or super-admin (can set selling price)
   const currentUser = authService.getUser()
   const isAgent = currentUser?.role === "agent"
+  const isSuperAdmin = currentUser?.role === "super-admin"
 
   // Unit mapping: reference unit -> display name
   const unitDisplayMap: Record<string, string> = {
@@ -84,6 +86,14 @@ export default function ProductModal({ product, onClose, onSave }: ProductModalP
   const [serialNumberInput, setSerialNumberInput] = useState<string>("")
   const [serialNumberMethod, setSerialNumberMethod] = useState<"manual" | "barcode" | "excel">("manual")
   const [serialNumberExcelFile, setSerialNumberExcelFile] = useState<File | null>(null)
+  
+  // Pricing for serial numbers (cost price)
+  const [individualPricing, setIndividualPricing] = useState<boolean>(false)
+  // Super Admin: selling price - use max cost from stock or manual
+  const [useMaxCostForSelling, setUseMaxCostForSelling] = useState<boolean>(true)
+  const [sellingPriceOverride, setSellingPriceOverride] = useState<number>(0)
+  const [defaultPrice, setDefaultPrice] = useState<number>(0)
+  const [serialNumberPrices, setSerialNumberPrices] = useState<Record<string, number>>({})
   
   // Camera barcode scanning
   const [isScanning, setIsScanning] = useState(false)
@@ -178,6 +188,11 @@ export default function ProductModal({ product, onClose, onSave }: ProductModalP
       setSerialNumberInput("") // Reset serial number input
       setSerialNumberExcelFile(null) // Reset Excel file
       setSerialNumberMethod("manual") // Reset to manual method
+      setIndividualPricing(false) // Reset pricing mode
+      setDefaultPrice(0) // Reset default price
+      setSerialNumberPrices({}) // Reset individual prices
+      setUseMaxCostForSelling(true) // Reset selling price mode
+      setSellingPriceOverride((product.selling_price ?? product.unit_price ?? product.price ?? 0) || 0) // Pre-fill from product
       setCurrentStep(1) // Reset to step 1
       setCreatedProductId(null) // Reset created product ID
       
@@ -187,11 +202,32 @@ export default function ProductModal({ product, onClose, onSave }: ProductModalP
           try {
             setLoadingSerialNumbers(true)
             const serials = await serialNumbersApi.getByProduct(product.id!)
-            // Ensure serials is always an array
-            setAssignedSerialNumbers(Array.isArray(serials) ? serials : [])
+            const fromApi = Array.isArray(serials) ? serials : []
+            // Fallback: if API returns empty but product has serial_numbers (e.g. from create response), use those
+            if (fromApi.length === 0 && product.serial_numbers && Array.isArray(product.serial_numbers) && product.serial_numbers.length > 0) {
+              const fallback: SerialNumber[] = product.serial_numbers.map((sn, i) => ({
+                id: `fallback-${i}-${sn}`,
+                product_id: product.id!,
+                serial_number: sn,
+                created_at: new Date().toISOString(),
+              }))
+              setAssignedSerialNumbers(fallback)
+            } else {
+              setAssignedSerialNumbers(fromApi)
+            }
           } catch (err) {
             console.error("Failed to fetch serial numbers:", err)
-            setAssignedSerialNumbers([])
+            // Fallback when API fails
+            if (product.serial_numbers && Array.isArray(product.serial_numbers) && product.serial_numbers.length > 0) {
+              setAssignedSerialNumbers(product.serial_numbers.map((sn, i) => ({
+                id: `fallback-${i}-${sn}`,
+                product_id: product.id!,
+                serial_number: sn,
+                created_at: new Date().toISOString(),
+              })))
+            } else {
+              setAssignedSerialNumbers([])
+            }
           } finally {
             setLoadingSerialNumbers(false)
           }
@@ -564,17 +600,55 @@ export default function ProductModal({ product, onClose, onSave }: ProductModalP
   }
 
 
-  // Handle step 2: Serial number submission for new products
+  // Handle step 2: Create product with serial numbers
   const handleSerialNumbersSubmit = async () => {
-    if (!createdProductId) return
-    
     setError(null)
     setLoading(true)
     
     try {
-      // Validate serial numbers match quantity
       const quantity = formData.quantity || 0
-      if (quantity > 0) {
+      
+      // Ensure category exists before creating product
+      const categoryName = formData.category.trim()
+      if (categoryName && !categories.includes(categoryName)) {
+        try {
+          await categoriesApi.create(categoryName)
+          // Refresh categories list
+          const updatedCats = await categoriesApi.getAll()
+          const sortedCategories = [...updatedCats].sort((a: any, b: any) => {
+            const dateA = a.created_at ? new Date(a.created_at).getTime() : 0
+            const dateB = b.created_at ? new Date(b.created_at).getTime() : 0
+            return dateB - dateA // Newest first
+          })
+          setCategories(sortedCategories.map(c => c.label))
+        } catch (catErr) {
+          // Category creation might fail if backend auto-creates categories
+          // or if category already exists. Continue with product creation.
+          console.log("Category may already exist or will be auto-created:", catErr)
+        }
+      }
+      
+      // Prepare product data for creation
+      const productData: any = {
+        name: formData.name,
+        model: formData.model,
+        category: categoryName,
+        wattage: formData.wattage || undefined,
+        quantity: quantity,
+        unit: formData.unit,
+        image: imageFile || undefined,
+      }
+      
+      // Include price if provided
+      if (formData.price && formData.price > 0) {
+        productData.unit_price = formData.price
+      } else {
+        productData.unit_price = 0
+      }
+      
+      // If quantity > 0 and serial numbers are provided, validate and include them
+      if (quantity > 0 && (serialNumbers.length > 0 || serialNumberExcelFile)) {
+        // Validate serial numbers match quantity
         if (serialNumberExcelFile) {
           // Excel file will be processed by backend
           // No need to validate count here
@@ -583,33 +657,49 @@ export default function ProductModal({ product, onClose, onSave }: ProductModalP
           setLoading(false)
           return
         }
+        
+        // Add serial numbers to product data
+        // Each serial number will be associated with product name, category, and cost price
+        if (serialNumbers.length > 0) {
+          productData.serial_numbers = serialNumbers
+          
+          // Include product metadata for serial numbers association
+          // Backend should use this to associate each serial number with product name and category
+          productData.product_name = formData.name
+          productData.product_category = categoryName
+        } else if (serialNumberExcelFile) {
+          // If using image/excel, backend will extract serial numbers
+          // For now, show error that manual entry is required
+          setError("Please enter serial numbers manually, or wait for backend to support image/Excel extraction")
+          setLoading(false)
+          return
+        }
+        
+        // Add pricing data (cost price for each serial number)
+        if (serialNumbers.length > 0) {
+          if (individualPricing) {
+            // Individual prices for each serial number
+            productData.serial_number_prices = serialNumberPrices
+          } else {
+            // Single price for all serial numbers (cost price)
+            productData.default_price = defaultPrice
+          }
+        }
       }
       
-      // Prepare update data - backend expects serial_numbers as JSON string array
-      const updateData: any = {
-        stock_to_add: quantity,
-      }
+      // Create product with serial numbers and pricing
+      const created = await productsApi.create(productData)
       
-      // For now, only send serial_numbers array (image/excel processing should happen on backend)
-      // If we have serial numbers from any method, send them
-      if (serialNumbers.length > 0) {
-        updateData.serial_numbers = serialNumbers
-      } else if (serialNumberExcelFile) {
-        // If using image/excel, backend will extract serial numbers
-        // For now, we'll need to wait for backend to process and return them
-        // Or we can extract them on frontend first (if using a library)
-        // For now, show error that manual entry is required
-        setError("Please enter serial numbers manually, or wait for backend to support image/Excel extraction")
-        setLoading(false)
-        return
-      }
+      // Ensure serial_numbers are on the created product (for View All fallback if backend doesn't return them)
+      const createdWithSerials = serialNumbers.length > 0
+        ? { ...created, serial_numbers: created.serial_numbers ?? serialNumbers }
+        : created
       
-      // Update product with serial numbers
-      const updated = await productsApi.update(createdProductId, updateData)
-      onSave(updated)
+      // Product created successfully - show in catalog
+      onSave(createdWithSerials)
       onClose()
     } catch (err: any) {
-      setError(err.message || "Failed to save serial numbers")
+      setError(err.message || "Failed to create product")
     } finally {
       setLoading(false)
     }
@@ -648,20 +738,8 @@ export default function ProductModal({ product, onClose, onSave }: ProductModalP
         }
       }
 
-      // Check for duplicate product when creating new product
-      if (!product?.id) {
-        // Check if product with same name and model already exists
-        const duplicateProduct = products.find(
-          p => p.name.toLowerCase().trim() === formData.name.toLowerCase().trim() &&
-               p.model.toLowerCase().trim() === formData.model.toLowerCase().trim()
-        )
-        
-        if (duplicateProduct) {
-          setError(`This product already exists! Product "${formData.name}" with model "${formData.model}" is already present in the system. Please edit the existing product to add quantity.`)
-          setLoading(false)
-          return
-        }
-      }
+      // Note: Duplicate product validation is handled by the backend
+      // Frontend no longer blocks submission - backend will return appropriate error if duplicate exists
       
       // Calculate final quantity: if editing and stockToAdd > 0, add to existing; otherwise use formData.quantity
       let finalQuantity = formData.quantity || 0
@@ -700,6 +778,19 @@ export default function ProductModal({ product, onClose, onSave }: ProductModalP
         if (serialNumbers.length > 0) {
           // Include serial numbers array (will be sent as JSON string in FormData)
           productData.serial_numbers = serialNumbers
+          
+          // Include product metadata for serial number association
+          productData.product_name = formData.name
+          productData.product_category = categoryName
+          
+          // Add pricing data (cost price for each serial number)
+          if (individualPricing) {
+            // Individual prices for each serial number
+            productData.serial_number_prices = serialNumberPrices
+          } else {
+            // Single price for all serial numbers (cost price)
+            productData.default_price = defaultPrice
+          }
       } else if (serialNumberExcelFile) {
         // TODO: Backend should support excel extraction
         // For now, show error that manual entry is required
@@ -710,14 +801,24 @@ export default function ProductModal({ product, onClose, onSave }: ProductModalP
         productData.stock_to_add = stockToAdd
       }
       
-      // Only include price if user is agent
-      if (isAgent) {
-        productData.unit_price = formData.price || 0
+      // Include price if provided (for all users)
+      // unit_price = cost price (same concept). selling_price = separate field set by Super Admin.
+      if (isSuperAdmin && product?.id) {
+        // Super Admin: set selling_price only (do NOT overwrite unit_price/cost price)
+        productData.use_max_cost_price = useMaxCostForSelling
+        if (useMaxCostForSelling) {
+          // Backend will compute selling_price from max cost of serial numbers
+        } else if (sellingPriceOverride > 0) {
+          productData.selling_price = sellingPriceOverride
+        }
+        // Do NOT send unit_price - it is cost price and stays unchanged
+      } else if (formData.price && formData.price > 0) {
+        productData.unit_price = formData.price
       } else if (product) {
-        // For super-admin/admin editing, keep existing price if product exists
+        // For editing, keep existing unit_price (cost price) if product exists
         productData.unit_price = product.unit_price || product.price || 0
       } else {
-        // For super-admin/admin creating new product, set default price to 0
+        // For creating new product without price, set to 0
         productData.unit_price = 0
       }
 
@@ -731,31 +832,16 @@ export default function ProductModal({ product, onClose, onSave }: ProductModalP
           onSave(updated)
         } else {
           // Regular update without files
-          const updated = await productsApi.update(product.id, productData)
-          onSave(updated)
+        const updated = await productsApi.update(product.id, productData)
+        onSave(updated)
         }
       } else {
-        // Create new product - Step 1: Create product first
-        const created = await productsApi.create(productData)
-        setCreatedProductId(created.id)
-        
-        // If quantity > 0, move to step 2 for serial number entry
-        if (formData.quantity > 0) {
-          setCurrentStep(2)
-          setLoading(false)
-          // Refresh products list
-          const updatedProds = await productsApi.getAll()
-          const sortedProducts = [...updatedProds].sort((a, b) => {
-            const dateA = a.created_at ? new Date(a.created_at).getTime() : 0
-            const dateB = b.created_at ? new Date(b.created_at).getTime() : 0
-            return dateB - dateA // Newest first
-          })
-          setProducts(sortedProducts)
-        } else {
-          // No quantity, skip serial numbers and close
-          onSave(created)
-          onClose()
-        }
+        // Create new product - Step 1: Just validate and move to Step 2
+        // Product will be created in Step 2 after serial numbers are entered
+        // Always move to step 2 (even if quantity is 0)
+        setCurrentStep(2)
+        setLoading(false)
+        // Product will be created in handleSerialNumbersSubmit
       }
     } catch (err: any) {
       setError(err.message || "Failed to save product")
@@ -769,7 +855,14 @@ export default function ProductModal({ product, onClose, onSave }: ProductModalP
       <Card className="bg-slate-800 border-slate-700 p-4 sm:p-6 lg:p-8 max-w-[95%] sm:max-w-lg w-full my-4 sm:my-8 max-h-[95vh] overflow-y-auto">
         <div className="flex items-center justify-between mb-4 sm:mb-6">
           <h2 className="text-xl sm:text-2xl font-bold text-white">{product ? "Edit Product" : "Add New Product"}</h2>
-          <button onClick={onClose} className="text-slate-400 hover:text-white transition flex-shrink-0 ml-2">
+          <button 
+            onClick={() => {
+              // If on Step 2, product hasn't been created yet, so just close
+              // No need to save anything
+              onClose()
+            }} 
+            className="text-slate-400 hover:text-white transition flex-shrink-0 ml-2"
+          >
             <X className="w-5 h-5 sm:w-6 sm:h-6" />
           </button>
         </div>
@@ -786,8 +879,12 @@ export default function ProductModal({ product, onClose, onSave }: ProductModalP
           <div className="space-y-4">
             <div className="p-4 bg-blue-900/20 border border-blue-700 rounded-lg">
               <p className="text-sm text-blue-300">
-                Product <strong>{formData.name}</strong> created successfully! 
-                Now add serial numbers for {formData.quantity} units.
+                Product details for <strong>{formData.name}</strong> are ready. 
+                {formData.quantity > 0 ? (
+                  <> Now add serial numbers for {formData.quantity} units.</>
+                ) : (
+                  <> Click Complete to create the product.</>
+                )}
               </p>
             </div>
             
@@ -983,29 +1080,50 @@ Example: SN001, SN002, SN003"
                     </p>
                   </div>
 
-                  {/* Scanned Serial Numbers Display */}
+                  {/* Scanned Serial Numbers Display - with price beside each when checkbox checked */}
                   {serialNumbers.length > 0 && (
-                    <div className="mt-2">
+                    <div className="mt-2 space-y-2">
                       <p className="text-xs text-slate-400 mb-2">
                         Scanned: {serialNumbers.length} of {formData.quantity || stockToAdd || 0}
                       </p>
-                      <div className="flex flex-wrap gap-2">
+                      <div className="space-y-2">
                         {serialNumbers.map((sn, idx) => (
-                          <span
-                            key={idx}
-                            className="px-2 py-1 bg-blue-600/20 text-blue-300 text-xs rounded border border-blue-500/50 flex items-center gap-1"
+                          <div
+                            key={`${sn}-${idx}`}
+                            className="flex items-center gap-2 flex-wrap"
                           >
-                            {sn}
-                            <button
-                              type="button"
-                              onClick={() => {
-                                setSerialNumbers(serialNumbers.filter((_, i) => i !== idx))
-                              }}
-                              className="text-blue-400 hover:text-blue-300"
-                            >
-                              <X className="w-3 h-3" />
-                            </button>
-                          </span>
+                            <span className="px-2 py-1.5 bg-blue-600/20 text-blue-300 text-xs rounded border border-blue-500/50 flex items-center gap-1 shrink-0">
+                              {sn}
+                              <button
+                                type="button"
+                                onClick={() => {
+                                  setSerialNumbers(serialNumbers.filter((_, i) => i !== idx))
+                                  const nextPrices = { ...serialNumberPrices }
+                                  delete nextPrices[sn]
+                                  setSerialNumberPrices(nextPrices)
+                                }}
+                                className="text-blue-400 hover:text-blue-300"
+                              >
+                                <X className="w-3 h-3" />
+                              </button>
+                            </span>
+                            {individualPricing && (
+                              <div className="flex items-center gap-2 shrink-0">
+                                <span className="text-xs text-slate-400">Price (₹):</span>
+                                <input
+                                  type="text"
+                                  value={serialNumberPrices[sn] !== undefined && serialNumberPrices[sn] !== null ? serialNumberPrices[sn] : ""}
+                                  onChange={(e) => {
+                                    const value = e.target.value.replace(/[^\d.]/g, "")
+                                    const numValue = value ? parseFloat(value) || 0 : 0
+                                    setSerialNumberPrices({ ...serialNumberPrices, [sn]: numValue })
+                                  }}
+                                  placeholder="Cost price"
+                                  className="w-24 px-2 py-1.5 bg-slate-700 border border-slate-600 rounded text-white placeholder-slate-500 focus:outline-none focus:border-blue-500 text-sm"
+                                />
+                              </div>
+                            )}
+                          </div>
                         ))}
                       </div>
                     </div>
@@ -1062,6 +1180,109 @@ Example: SN001, SN002, SN003"
               )}
             </div>
             
+            {/* Cost Price Section - Show when quantity > 0 (checkbox visible from start) */}
+            {formData.quantity > 0 && (
+              <div className="p-4 bg-slate-800/50 border border-slate-600 rounded-lg space-y-4">
+                <div className="flex items-center justify-between mb-2">
+                  <div className="flex items-center gap-2">
+                    <DollarSign className="w-5 h-5 text-green-500" />
+                    <label className="text-sm font-medium text-slate-300">
+                      Cost Price
+                    </label>
+                  </div>
+                </div>
+                
+                <div className="flex items-center gap-3 mb-4">
+                  <Checkbox
+                    id="individualPricing"
+                    checked={individualPricing}
+                    onCheckedChange={(checked) => {
+                      const isChecked = !!checked
+                      setIndividualPricing(isChecked)
+                      if (!isChecked) {
+                        setSerialNumberPrices({})
+                      } else {
+                        if (defaultPrice > 0 && serialNumbers.length > 0) {
+                          const initialPrices: Record<string, number> = {}
+                          serialNumbers.forEach(sn => {
+                            initialPrices[sn] = defaultPrice
+                          })
+                          setSerialNumberPrices(initialPrices)
+                        }
+                      }
+                    }}
+                    className="border-2 border-slate-400 bg-slate-700 shrink-0 data-[state=checked]:bg-blue-600 data-[state=checked]:border-blue-600"
+                  />
+                  <label htmlFor="individualPricing" className="text-sm font-medium text-slate-300 cursor-pointer select-none">
+                    Set individual cost price per serial number (unchecked = same cost price for all)
+                  </label>
+                </div>
+                
+                {!individualPricing ? (
+                  // Same cost price for all serial numbers (default)
+                  <div>
+                    <label className="block text-sm font-medium text-slate-300 mb-2">
+                      Cost Price (₹) – same for all {formData.quantity} items *
+                    </label>
+                    <input
+                      type="text"
+                      value={defaultPrice || ""}
+                      onChange={(e) => {
+                        const value = e.target.value.replace(/[^\d.]/g, "")
+                        setDefaultPrice(value ? parseFloat(value) || 0 : 0)
+                      }}
+                      placeholder="Enter cost price for all items"
+                      className="w-full px-4 py-2 bg-slate-700 border border-slate-600 rounded-lg text-white placeholder-slate-500 focus:outline-none focus:border-blue-500"
+                    />
+                    <p className="text-xs text-slate-400 mt-1">
+                      ✓ Same cost price for all {formData.quantity} items
+                    </p>
+                  </div>
+                ) : (
+                  // Individual cost price per serial number
+                  <div className="space-y-3">
+                    <label className="block text-sm font-medium text-slate-300 mb-2">
+                      Cost Price (₹) per serial number *
+                    </label>
+                    {serialNumbers.length > 0 ? (
+                      <>
+                        <div className="space-y-2 max-h-[300px] overflow-y-auto pr-2">
+                          {serialNumbers.map((sn, idx) => (
+                            <div key={`${sn}-${idx}`} className="flex items-center gap-2">
+                              <div className="flex-1 min-w-0">
+                                <p className="text-xs text-slate-400 mb-1 truncate font-mono">{sn}</p>
+                                <input
+                                  type="text"
+                                  value={serialNumberPrices[sn] !== undefined && serialNumberPrices[sn] !== null ? serialNumberPrices[sn] : ""}
+                                  onChange={(e) => {
+                                    const value = e.target.value.replace(/[^\d.]/g, "")
+                                    const numValue = value ? parseFloat(value) || 0 : 0
+                                    setSerialNumberPrices({
+                                      ...serialNumberPrices,
+                                      [sn]: numValue
+                                    })
+                                  }}
+                                  placeholder="Enter cost price"
+                                  className="w-full px-3 py-1.5 bg-slate-700 border border-slate-600 rounded-lg text-white placeholder-slate-500 focus:outline-none focus:border-blue-500 text-sm"
+                                />
+                              </div>
+                            </div>
+                          ))}
+                        </div>
+                        <p className="text-xs text-slate-400">
+                          ✓ Enter cost price for each of the {serialNumbers.length} serial numbers
+                        </p>
+                      </>
+                    ) : (
+                      <p className="text-sm text-amber-400/90">
+                        Enter serial numbers above first, then set individual cost prices here.
+                      </p>
+                    )}
+                  </div>
+                )}
+              </div>
+            )}
+            
             {/* Buttons */}
             <div className="flex flex-col sm:flex-row gap-3 pt-4 border-t border-slate-700">
               <Button
@@ -1074,8 +1295,17 @@ Example: SN001, SN002, SN003"
               </Button>
               <Button
                 type="button"
-                onClick={handleSerialNumbersSubmit}
-                disabled={loading || (serialNumberMethod !== "excel" && serialNumbers.length !== formData.quantity)}
+                onClick={async () => {
+                  // Always call handleSerialNumbersSubmit - it handles both cases
+                  // (with or without serial numbers) and will show product in catalog
+                  await handleSerialNumbersSubmit()
+                }}
+                disabled={
+                  loading || 
+                  (formData.quantity > 0 && serialNumberMethod !== "excel" && serialNumbers.length > 0 && serialNumbers.length !== formData.quantity) ||
+                  (formData.quantity > 0 && serialNumbers.length > 0 && !individualPricing && defaultPrice <= 0) ||
+                  (formData.quantity > 0 && serialNumbers.length > 0 && individualPricing && serialNumbers.some(sn => !serialNumberPrices[sn] || serialNumberPrices[sn] <= 0))
+                }
                 className="flex-1 bg-blue-600 hover:bg-blue-700 text-white disabled:opacity-50 disabled:cursor-not-allowed"
               >
                 {loading ? (
@@ -1091,7 +1321,7 @@ Example: SN001, SN002, SN003"
           </div>
         ) : (
           // Step 1: Product Details Form
-          <form onSubmit={handleSubmit} className="space-y-4">
+        <form onSubmit={handleSubmit} className="space-y-4">
           <div className="relative">
             <label className="block text-sm font-medium text-slate-300 mb-2">
               Category * 
@@ -1350,6 +1580,57 @@ Example: SN001, SN002, SN003"
                 </div>
               </div>
               
+              {/* Super Admin: Selling Price per product */}
+              {isSuperAdmin && product?.id && (
+                <div className="p-4 bg-slate-800/50 border border-slate-600 rounded-lg space-y-3">
+                  <div className="flex items-center gap-2">
+                    <DollarSign className="w-5 h-5 text-amber-500" />
+                    <label className="text-sm font-medium text-slate-300">Selling Price</label>
+                  </div>
+                  <div className="flex items-center gap-3">
+                    <Checkbox
+                      id="useMaxCostForSelling"
+                      checked={useMaxCostForSelling}
+                      onCheckedChange={(checked) => setUseMaxCostForSelling(!!checked)}
+                      className="border-2 border-slate-400 bg-slate-700 shrink-0 data-[state=checked]:bg-blue-600 data-[state=checked]:border-blue-600"
+                    />
+                    <label htmlFor="useMaxCostForSelling" className="text-sm font-medium text-slate-300 cursor-pointer select-none">
+                      Use max cost price from registered stock (default)
+                    </label>
+                  </div>
+                  {useMaxCostForSelling ? (
+                    <div className="text-sm text-slate-400">
+                      {Array.isArray(assignedSerialNumbers) && assignedSerialNumbers.length > 0 ? (
+                        (() => {
+                          const maxCost = Math.max(...assignedSerialNumbers.map(s => (s.cost_price ?? 0) || 0), 0)
+                          return maxCost > 0 ? (
+                            <p>Default selling price: ₹{maxCost.toLocaleString()} (max cost from {assignedSerialNumbers.length} serial number{assignedSerialNumbers.length !== 1 ? 's' : ''})</p>
+                          ) : (
+                            <p>No cost prices in serial numbers yet. Set a manual selling price below or add cost prices when adding stock.</p>
+                          )
+                        })()
+                      ) : (
+                        <p>No serial numbers yet. Set a manual selling price below or add stock with serial numbers.</p>
+                      )}
+                    </div>
+                  ) : (
+                    <div>
+                      <label className="block text-sm font-medium text-slate-300 mb-2">Selling Price (₹) – manual override</label>
+                      <input
+                        type="text"
+                        value={sellingPriceOverride || ""}
+                        onChange={(e) => {
+                          const value = e.target.value.replace(/[^\d.]/g, "")
+                          setSellingPriceOverride(value ? parseFloat(value) || 0 : 0)
+                        }}
+                        placeholder="Enter selling price"
+                        className="w-full px-4 py-2 bg-slate-700 border border-slate-600 rounded-lg text-white placeholder-slate-500 focus:outline-none focus:border-blue-500"
+                      />
+                    </div>
+                  )}
+                </div>
+              )}
+              
               <div>
                 <label className="block text-sm font-medium text-slate-300 mb-2">
                   Add Stock
@@ -1369,6 +1650,9 @@ Example: SN001, SN002, SN003"
                         setSerialNumbers([])
                         setSerialNumberInput("")
                         setSerialNumberExcelFile(null)
+                        setIndividualPricing(false)
+                        setDefaultPrice(0)
+                        setSerialNumberPrices({})
                         if (isScanning) {
                           stopCameraScanning()
                         }
@@ -1578,29 +1862,50 @@ Example: SN001, SN002, SN003"
                         </p>
                       </div>
 
-                      {/* Scanned Serial Numbers Display */}
+                      {/* Scanned Serial Numbers Display - with price beside each when checkbox checked */}
                       {serialNumbers.length > 0 && (
-                        <div className="mt-2">
+                        <div className="mt-2 space-y-2">
                           <p className="text-xs text-slate-400 mb-2">
                             Scanned: {serialNumbers.length} of {stockToAdd || 0}
                           </p>
-                          <div className="flex flex-wrap gap-2">
+                          <div className="space-y-2">
                             {serialNumbers.map((sn, idx) => (
-                              <span
-                                key={idx}
-                                className="px-2 py-1 bg-blue-600/20 text-blue-300 text-xs rounded border border-blue-500/50 flex items-center gap-1"
+                              <div
+                                key={`${sn}-${idx}`}
+                                className="flex items-center gap-2 flex-wrap"
                               >
-                                {sn}
-                                <button
-                                  type="button"
-                                  onClick={() => {
-                                    setSerialNumbers(serialNumbers.filter((_, i) => i !== idx))
-                                  }}
-                                  className="text-blue-400 hover:text-blue-300"
-                                >
-                                  <X className="w-3 h-3" />
-                                </button>
-                              </span>
+                                <span className="px-2 py-1.5 bg-blue-600/20 text-blue-300 text-xs rounded border border-blue-500/50 flex items-center gap-1 shrink-0">
+                                  {sn}
+                                  <button
+                                    type="button"
+                                    onClick={() => {
+                                      setSerialNumbers(serialNumbers.filter((_, i) => i !== idx))
+                                      const nextPrices = { ...serialNumberPrices }
+                                      delete nextPrices[sn]
+                                      setSerialNumberPrices(nextPrices)
+                                    }}
+                                    className="text-blue-400 hover:text-blue-300"
+                                  >
+                                    <X className="w-3 h-3" />
+                                  </button>
+                                </span>
+                                {individualPricing && (
+                                  <div className="flex items-center gap-2 shrink-0">
+                                    <span className="text-xs text-slate-400">Price (₹):</span>
+                                    <input
+                                      type="text"
+                                      value={serialNumberPrices[sn] !== undefined && serialNumberPrices[sn] !== null ? serialNumberPrices[sn] : ""}
+                                      onChange={(e) => {
+                                        const value = e.target.value.replace(/[^\d.]/g, "")
+                                        const numValue = value ? parseFloat(value) || 0 : 0
+                                        setSerialNumberPrices({ ...serialNumberPrices, [sn]: numValue })
+                                      }}
+                                      placeholder="Cost price"
+                                      className="w-24 px-2 py-1.5 bg-slate-700 border border-slate-600 rounded text-white placeholder-slate-500 focus:outline-none focus:border-blue-500 text-sm"
+                                    />
+                                  </div>
+                                )}
+                              </div>
                             ))}
                           </div>
                         </div>
@@ -1657,15 +1962,120 @@ Example: SN001, SN002, SN003"
                   )}
                 </div>
               )}
+              
+              {/* Cost Price Section for Edit Mode - Always show (same as Add Product) */}
+              <div className="mt-4 p-4 bg-slate-800/50 border border-slate-600 rounded-lg space-y-4">
+                <div className="flex items-center justify-between mb-2">
+                  <div className="flex items-center gap-2">
+                    <DollarSign className="w-5 h-5 text-green-500" />
+                    <label className="text-sm font-medium text-slate-300">
+                      Cost Price
+                    </label>
+                  </div>
+                </div>
+                
+                <div className="flex items-center gap-3 mb-4">
+                  <Checkbox
+                    id="individualPricingEdit"
+                    checked={individualPricing}
+                    onCheckedChange={(checked) => {
+                      const isChecked = !!checked
+                      setIndividualPricing(isChecked)
+                      if (!isChecked) {
+                        setSerialNumberPrices({})
+                      } else {
+                        if (defaultPrice > 0 && serialNumbers.length > 0) {
+                          const initialPrices: Record<string, number> = {}
+                          serialNumbers.forEach(sn => {
+                            initialPrices[sn] = defaultPrice
+                          })
+                          setSerialNumberPrices(initialPrices)
+                        }
+                      }
+                    }}
+                    className="border-2 border-slate-400 bg-slate-700 shrink-0 data-[state=checked]:bg-blue-600 data-[state=checked]:border-blue-600"
+                  />
+                  <label htmlFor="individualPricingEdit" className="text-sm font-medium text-slate-300 cursor-pointer select-none">
+                    Set individual cost price per serial number (unchecked = same cost price for all)
+                  </label>
+                </div>
+                
+                {stockToAdd > 0 ? (
+                  !individualPricing ? (
+                    <div>
+                      <label className="block text-sm font-medium text-slate-300 mb-2">
+                        Cost Price (₹) – same for all {stockToAdd} items *
+                      </label>
+                      <input
+                        type="text"
+                        value={defaultPrice || ""}
+                        onChange={(e) => {
+                          const value = e.target.value.replace(/[^\d.]/g, "")
+                          setDefaultPrice(value ? parseFloat(value) || 0 : 0)
+                        }}
+                        placeholder="Enter cost price for all items"
+                        className="w-full px-4 py-2 bg-slate-700 border border-slate-600 rounded-lg text-white placeholder-slate-500 focus:outline-none focus:border-blue-500"
+                      />
+                      <p className="text-xs text-slate-400 mt-1">
+                        ✓ Same cost price for all {stockToAdd} items
+                      </p>
+                    </div>
+                  ) : (
+                    <div className="space-y-3">
+                      <label className="block text-sm font-medium text-slate-300 mb-2">
+                        Cost Price (₹) per serial number *
+                      </label>
+                      {serialNumbers.length > 0 ? (
+                        <>
+                          <div className="space-y-2 max-h-[300px] overflow-y-auto pr-2">
+                            {serialNumbers.map((sn, idx) => (
+                              <div key={`${sn}-${idx}`} className="flex items-center gap-2">
+                                <div className="flex-1 min-w-0">
+                                  <p className="text-xs text-slate-400 mb-1 truncate font-mono">{sn}</p>
+                                  <input
+                                    type="text"
+                                    value={serialNumberPrices[sn] !== undefined && serialNumberPrices[sn] !== null ? serialNumberPrices[sn] : ""}
+                                    onChange={(e) => {
+                                      const value = e.target.value.replace(/[^\d.]/g, "")
+                                      const numValue = value ? parseFloat(value) || 0 : 0
+                                      setSerialNumberPrices({
+                                        ...serialNumberPrices,
+                                        [sn]: numValue
+                                      })
+                                    }}
+                                    placeholder="Enter cost price"
+                                    className="w-full px-3 py-1.5 bg-slate-700 border border-slate-600 rounded-lg text-white placeholder-slate-500 focus:outline-none focus:border-blue-500 text-sm"
+                                  />
+                                </div>
+                              </div>
+                            ))}
+                          </div>
+                          <p className="text-xs text-slate-400">
+                            ✓ Enter cost price for each of the {serialNumbers.length} serial numbers
+                          </p>
+                        </>
+                      ) : (
+                        <p className="text-sm text-amber-400/90">
+                          Enter serial numbers above first, then set individual cost prices here.
+                        </p>
+                      )}
+                    </div>
+                  )
+                ) : (
+                  <p className="text-sm text-slate-400">
+                    Enter quantity to add above to set cost price.
+                  </p>
+                )}
+              </div>
             </>
           ) : (
             // Create mode: Show regular quantity and unit fields
             <div className="grid grid-cols-2 gap-3">
-              <div>
-                <label className="block text-sm font-medium text-slate-300 mb-2">Quantity *</label>
-                <input
+          <div>
+            <label className="block text-sm font-medium text-slate-300 mb-2">Quantity *</label>
+            <input
                   type="text"
-                  name="quantity"
+              name="quantity"
                   value={formData.quantity || ""}
                   onChange={(e) => {
                     const value = e.target.value
@@ -1677,11 +2087,11 @@ Example: SN001, SN002, SN003"
                       }))
                     }
                   }}
-                  className="w-full px-4 py-2 bg-slate-700 border border-slate-600 rounded-lg text-white placeholder-slate-500 focus:outline-none focus:border-blue-500"
+              className="w-full px-4 py-2 bg-slate-700 border border-slate-600 rounded-lg text-white placeholder-slate-500 focus:outline-none focus:border-blue-500"
                   placeholder="Enter quantity"
-                  required
-                />
-              </div>
+              required
+            />
+          </div>
               <div>
                 <label className="block text-sm font-medium text-slate-300 mb-2">Unit *</label>
                 <select
@@ -1703,19 +2113,84 @@ Example: SN001, SN002, SN003"
           )}
 
 
-          {isAgent && (
-            <div>
-              <label className="block text-sm font-medium text-slate-300 mb-2">Unit Price (₹) *</label>
-              <input
-                type="number"
-                name="price"
-                value={formData.price}
-                onChange={handleChange}
-                className="w-full px-4 py-2 bg-slate-700 border border-slate-600 rounded-lg text-white placeholder-slate-500 focus:outline-none focus:border-blue-500"
-                min="0"
-                step="0.01"
-                required
-              />
+          <div>
+            <label className="block text-sm font-medium text-slate-300 mb-2">Unit Price (₹)</label>
+            <input
+              type="text"
+              name="price"
+              value={formData.price || ""}
+              onChange={(e) => {
+                const value = e.target.value.replace(/[^\d.]/g, "")
+                setFormData(prev => ({
+                  ...prev,
+                  price: value ? parseFloat(value) || 0 : 0
+                }))
+              }}
+              placeholder="Enter price (optional)"
+              className="w-full px-4 py-2 bg-slate-700 border border-slate-600 rounded-lg text-white placeholder-slate-500 focus:outline-none focus:border-blue-500"
+            />
+            <p className="text-xs text-slate-400 mt-1">
+              {isAgent ? "Required for agents" : "Optional - can be set later or when adding serial numbers"}
+            </p>
+          </div>
+
+          {/* Cost Price Section - Step 1: Always show in Add New Product */}
+          {!product?.id && (
+            <div className="p-4 bg-slate-800/50 border border-slate-600 rounded-lg space-y-4">
+              <div className="flex items-center gap-2 mb-2">
+                <DollarSign className="w-5 h-5 text-green-500" />
+                <label className="text-sm font-medium text-slate-300">Cost Price</label>
+              </div>
+              <div className="flex items-center gap-3">
+                <Checkbox
+                  id="individualCostPricingStep1"
+                  checked={individualPricing}
+                  onCheckedChange={(checked) => {
+                    const isChecked = !!checked
+                    setIndividualPricing(isChecked)
+                    if (!isChecked) setSerialNumberPrices({})
+                    else if (defaultPrice > 0 && serialNumbers.length > 0) {
+                      const initialPrices: Record<string, number> = {}
+                      serialNumbers.forEach(sn => { initialPrices[sn] = defaultPrice })
+                      setSerialNumberPrices(initialPrices)
+                    }
+                  }}
+                  className="border-2 border-slate-400 bg-slate-700 shrink-0 data-[state=checked]:bg-blue-600 data-[state=checked]:border-blue-600"
+                />
+                <label htmlFor="individualCostPricingStep1" className="text-sm font-medium text-slate-300 cursor-pointer select-none">
+                  Set individual cost price per serial number (unchecked = same cost price for all)
+                </label>
+              </div>
+              {formData.quantity > 0 ? (
+                !individualPricing ? (
+                  <div>
+                    <label className="block text-sm font-medium text-slate-300 mb-2">
+                      Cost Price (₹) – same for all {formData.quantity} items *
+                    </label>
+                    <input
+                      type="text"
+                      value={defaultPrice || ""}
+                      onChange={(e) => {
+                        const value = e.target.value.replace(/[^\d.]/g, "")
+                        setDefaultPrice(value ? parseFloat(value) || 0 : 0)
+                      }}
+                      placeholder="Enter cost price for all items"
+                      className="w-full px-4 py-2 bg-slate-700 border border-slate-600 rounded-lg text-white placeholder-slate-500 focus:outline-none focus:border-blue-500"
+                    />
+                    <p className="text-xs text-slate-400 mt-1">
+                      ✓ Same cost price for all {formData.quantity} items
+                    </p>
+                  </div>
+                ) : (
+                  <p className="text-sm text-amber-400/90">
+                    You'll set individual cost prices in the next step when you add serial numbers.
+                  </p>
+                )
+              ) : (
+                <p className="text-sm text-slate-400">
+                  Enter quantity above to set cost price.
+                </p>
+              )}
             </div>
           )}
 
@@ -1782,14 +2257,37 @@ Example: SN001, SN002, SN003"
               </button>
             </div>
             
+            {/* Product details - category, name, current stock */}
+            {product?.id && (
+              <div className="mb-4 p-4 bg-slate-700/50 border border-slate-600 rounded-lg space-y-2">
+                <div className="flex flex-wrap gap-x-6 gap-y-1">
+                  <div>
+                    <span className="text-xs text-slate-400">Product Name:</span>
+                    <p className="text-sm font-medium text-white">{formData.name || product?.name}</p>
+                  </div>
+                  <div>
+                    <span className="text-xs text-slate-400">Category:</span>
+                    <p className="text-sm font-medium text-white">{formData.category || product?.category}</p>
+                  </div>
+                  <div>
+                    <span className="text-xs text-slate-400">Current Stock:</span>
+                    <p className="text-sm font-medium text-white">{existingStock}</p>
+                  </div>
+                </div>
+              </div>
+            )}
+            
             {loadingSerialNumbers ? (
               <div className="flex items-center justify-center py-8">
                 <Loader2 className="w-6 h-6 animate-spin text-blue-400" />
                 <span className="ml-2 text-slate-300">Loading serial numbers...</span>
               </div>
             ) : !Array.isArray(assignedSerialNumbers) || assignedSerialNumbers.length === 0 ? (
-              <div className="text-center py-8 text-slate-400">
+              <div className="text-center py-8 text-slate-400 space-y-2">
                 <p>No serial numbers assigned to this product.</p>
+                <p className="text-xs max-w-sm mx-auto">
+                  Serial numbers are stored when you add stock with serial numbers. Products added without serial numbers will show none here.
+                </p>
               </div>
             ) : (
               <div className="space-y-2">
@@ -1800,6 +2298,11 @@ Example: SN001, SN002, SN003"
                       className="p-3 bg-slate-700/50 border border-slate-600 rounded-lg"
                     >
                       <p className="text-sm text-white font-mono">{sn.serial_number}</p>
+                      {sn.cost_price != null && sn.cost_price > 0 && (
+                        <p className="text-xs text-green-400 mt-1">
+                          Cost: ₹{Number(sn.cost_price).toLocaleString()}
+                        </p>
+                      )}
                       {sn.created_at && (
                         <p className="text-xs text-slate-400 mt-1">
                           Added: {new Date(sn.created_at).toLocaleDateString()}

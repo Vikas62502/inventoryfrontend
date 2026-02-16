@@ -194,6 +194,19 @@ if (currentUser.role === 'agent') {
 
 ---
 
+## 💰 Quotation Pricing – Use Selling Price
+
+**Important:** When an agent creates a quotation, all product amounts must use **selling_price** (separate field), not `unit_price` (cost price).
+
+- **selling_price** = separate column in `products` table (set by Super Admin)
+- **unit_price** = cost price – must NOT be used for quotation amounts
+- Line-item rate = product selling price
+- Line-item amount = quantity × selling price
+
+See **BACKEND_CHANGES_COST_PRICE_SELLING_PRICE_SERIALS.md** (Section 4) for full details.
+
+---
+
 ## 🗄️ Database Schema
 
 ### Quotations Table

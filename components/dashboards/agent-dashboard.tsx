@@ -148,27 +148,27 @@ export default function AgentDashboard({ userName }: AgentDashboardProps) {
         }
       } else {
         // Regular sale from sales API
-        const fullSale = await salesApi.getById(sale.id)
-        console.log("Fetched sale data:", fullSale)
-        
-        // Fetch all products for lookup
-        const allProducts = await productsApi.getAll()
-        const productsMap: Record<string, Product> = {}
-        allProducts.forEach(p => {
-          productsMap[p.id] = p
-        })
-        
-        // Validate required data
-        if (!fullSale.items || fullSale.items.length === 0) {
-          throw new Error("Sale has no items")
-        }
-        
-        // Generate and download PDF
-        try {
-          generateQuotationPDF(fullSale as any, productsMap)
-        } catch (pdfError: any) {
-          console.error("PDF generation error:", pdfError)
-          throw new Error(`PDF generation failed: ${pdfError.message}`)
+      const fullSale = await salesApi.getById(sale.id)
+      console.log("Fetched sale data:", fullSale)
+      
+      // Fetch all products for lookup
+      const allProducts = await productsApi.getAll()
+      const productsMap: Record<string, Product> = {}
+      allProducts.forEach(p => {
+        productsMap[p.id] = p
+      })
+      
+      // Validate required data
+      if (!fullSale.items || fullSale.items.length === 0) {
+        throw new Error("Sale has no items")
+      }
+      
+      // Generate and download PDF
+      try {
+        generateQuotationPDF(fullSale as any, productsMap)
+      } catch (pdfError: any) {
+        console.error("PDF generation error:", pdfError)
+        throw new Error(`PDF generation failed: ${pdfError.message}`)
         }
       }
     } catch (err: any) {
@@ -200,7 +200,7 @@ export default function AgentDashboard({ userName }: AgentDashboardProps) {
     }
     loadAdminInventory()
   }, [adminId])
-
+  
   // Load reference data for unit display
   useEffect(() => {
     const loadReferenceData = async () => {
@@ -458,35 +458,35 @@ export default function AgentDashboard({ userName }: AgentDashboardProps) {
         </TabsList>
 
         <TabsContent value="sales" className="mt-4">
-          {/* Sales Section */}
-          <div className="space-y-3 sm:space-y-4">
-            <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3 sm:gap-4">
-              <h2 className="text-lg sm:text-xl font-bold text-white">Sales</h2>
-              <div className="flex flex-col sm:flex-row gap-2 w-full sm:w-auto">
-                <Button
-                  onClick={() => {
-                    setSaleType("b2b")
-                    setShowSalesModal(true)
-                  }}
-                  className="bg-blue-600 hover:bg-blue-700 text-white text-xs sm:text-sm py-2 sm:py-2.5"
-                >
-                  <Plus className="w-3 h-3 sm:w-4 sm:h-4 mr-1.5 sm:mr-2" />
-                  <span className="hidden xs:inline">New B2B Sale</span>
-                  <span className="xs:hidden">B2B Sale</span>
-                </Button>
-                <Button
-                  onClick={() => {
-                    setSaleType("b2c")
-                    setShowSalesModal(true)
-                  }}
-                  className="bg-cyan-600 hover:bg-cyan-700 text-white text-xs sm:text-sm py-2 sm:py-2.5"
-                >
-                  <Plus className="w-3 h-3 sm:w-4 sm:h-4 mr-1.5 sm:mr-2" />
-                  <span className="hidden xs:inline">New B2C Sale</span>
-                  <span className="xs:hidden">B2C Sale</span>
-                </Button>
-              </div>
-            </div>
+      {/* Sales Section */}
+      <div className="space-y-3 sm:space-y-4">
+        <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3 sm:gap-4">
+          <h2 className="text-lg sm:text-xl font-bold text-white">Sales</h2>
+          <div className="flex flex-col sm:flex-row gap-2 w-full sm:w-auto">
+            <Button
+              onClick={() => {
+                setSaleType("b2b")
+                setShowSalesModal(true)
+              }}
+              className="bg-blue-600 hover:bg-blue-700 text-white text-xs sm:text-sm py-2 sm:py-2.5"
+            >
+              <Plus className="w-3 h-3 sm:w-4 sm:h-4 mr-1.5 sm:mr-2" />
+              <span className="hidden xs:inline">New B2B Sale</span>
+              <span className="xs:hidden">B2B Sale</span>
+            </Button>
+            <Button
+              onClick={() => {
+                setSaleType("b2c")
+                setShowSalesModal(true)
+              }}
+              className="bg-cyan-600 hover:bg-cyan-700 text-white text-xs sm:text-sm py-2 sm:py-2.5"
+            >
+              <Plus className="w-3 h-3 sm:w-4 sm:h-4 mr-1.5 sm:mr-2" />
+              <span className="hidden xs:inline">New B2C Sale</span>
+              <span className="xs:hidden">B2C Sale</span>
+            </Button>
+          </div>
+        </div>
 
         <div className="flex flex-col sm:flex-row gap-3">
           {/* Search by Customer */}
@@ -680,50 +680,50 @@ export default function AgentDashboard({ userName }: AgentDashboardProps) {
               <p className="text-slate-400">No sales found</p>
             </Card>
           )}
-        </div>
+      </div>
 
-            {/* Sales Stats */}
-            <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 sm:gap-4">
-              <Card className="bg-slate-800 border-slate-700 p-3 sm:p-4">
-                <div className="flex items-center justify-between mb-2 sm:mb-3">
-                  <BarChart3 className="w-4 h-4 sm:w-5 sm:h-5 text-blue-400" />
-                  <span className="text-xs text-slate-400">B2B Revenue</span>
-                </div>
+      {/* Sales Stats */}
+      <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 sm:gap-4">
+        <Card className="bg-slate-800 border-slate-700 p-3 sm:p-4">
+          <div className="flex items-center justify-between mb-2 sm:mb-3">
+            <BarChart3 className="w-4 h-4 sm:w-5 sm:h-5 text-blue-400" />
+            <span className="text-xs text-slate-400">B2B Revenue</span>
+          </div>
                 <p className="text-xl sm:text-2xl font-bold text-white">
                   {b2bRevenue > 0 ? `₹${(b2bRevenue / 1000).toFixed(1)}K` : '₹0'}
                 </p>
-                <p className="text-xs text-slate-400 mt-1">{b2bSales.length} transactions</p>
-              </Card>
-              <Card className="bg-slate-800 border-slate-700 p-3 sm:p-4">
-                <div className="flex items-center justify-between mb-2 sm:mb-3">
-                  <Target className="w-4 h-4 sm:w-5 sm:h-5 text-cyan-400" />
-                  <span className="text-xs text-slate-400">B2C Revenue</span>
-                </div>
+          <p className="text-xs text-slate-400 mt-1">{b2bSales.length} transactions</p>
+        </Card>
+        <Card className="bg-slate-800 border-slate-700 p-3 sm:p-4">
+          <div className="flex items-center justify-between mb-2 sm:mb-3">
+            <Target className="w-4 h-4 sm:w-5 sm:h-5 text-cyan-400" />
+            <span className="text-xs text-slate-400">B2C Revenue</span>
+          </div>
                 <p className="text-xl sm:text-2xl font-bold text-white">
                   {b2cRevenue > 0 ? `₹${(b2cRevenue / 1000).toFixed(1)}K` : '₹0'}
                 </p>
-                <p className="text-xs text-slate-400 mt-1">{b2cSales.length} transactions</p>
-              </Card>
-              <Card className="bg-slate-800 border-slate-700 p-3 sm:p-4">
-                <div className="flex items-center justify-between mb-2 sm:mb-3">
-                  <TrendingUp className="w-4 h-4 sm:w-5 sm:h-5 text-emerald-400" />
-                  <span className="text-xs text-slate-400">Avg. Sale Value</span>
-                </div>
+          <p className="text-xs text-slate-400 mt-1">{b2cSales.length} transactions</p>
+        </Card>
+        <Card className="bg-slate-800 border-slate-700 p-3 sm:p-4">
+          <div className="flex items-center justify-between mb-2 sm:mb-3">
+            <TrendingUp className="w-4 h-4 sm:w-5 sm:h-5 text-emerald-400" />
+            <span className="text-xs text-slate-400">Avg. Sale Value</span>
+          </div>
                 <p className="text-xl sm:text-2xl font-bold text-white">
                   {averageSaleValue > 0 ? `₹${averageSaleValue.toLocaleString()}` : '₹0'}
                 </p>
-                <p className="text-xs text-slate-400 mt-1 truncate">
-                  {topProduct ? `Top: ${topProduct[0]}` : "No sales yet"}
-                </p>
-              </Card>
-            </div>
+          <p className="text-xs text-slate-400 mt-1 truncate">
+            {topProduct ? `Top: ${topProduct[0]}` : "No sales yet"}
+          </p>
+        </Card>
+      </div>
           </div>
         </TabsContent>
 
         <TabsContent value="stock" className="mt-4">
           {/* Admin Stock Section */}
-          <div className="space-y-3 sm:space-y-4">
-            <div className="flex items-center justify-between flex-wrap gap-4">
+        <div className="space-y-3 sm:space-y-4">
+          <div className="flex items-center justify-between flex-wrap gap-4">
               <h2 className="text-lg sm:text-xl font-bold text-white flex items-center gap-2">
                 <Package className="w-5 h-5 text-cyan-500" />
                 Admin Stock
@@ -731,20 +731,20 @@ export default function AgentDashboard({ userName }: AgentDashboardProps) {
               <p className="text-xs sm:text-sm text-slate-400">
                 Stock available from your admin (stock remains with admin)
               </p>
-            </div>
-
+          </div>
+          
             {/* Search for Stock */}
-            <div className="relative">
-              <Search className="w-4 h-4 absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" />
-              <input
-                type="text"
+          <div className="relative">
+            <Search className="w-4 h-4 absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" />
+            <input
+              type="text"
                 placeholder="Search by product name or model..."
                 value={stockSearchQuery}
                 onChange={(e) => setStockSearchQuery(e.target.value)}
                 className="w-full pl-10 pr-4 py-2 bg-slate-700 border border-slate-600 rounded-lg text-white placeholder-slate-500 focus:outline-none focus:border-cyan-500"
-              />
-            </div>
-
+            />
+          </div>
+          
             {loadingAdminInventory ? (
               <Card className="bg-slate-800 border-slate-700 p-8 text-center">
                 <Loader2 className="w-8 h-8 text-cyan-500 animate-spin mx-auto mb-4" />
@@ -769,7 +769,7 @@ export default function AgentDashboard({ userName }: AgentDashboardProps) {
                     {filteredStock.map((item) => (
                 <Card key={item.productId} className="bg-slate-800 border-slate-700 p-4">
                   <div className="flex items-start justify-between gap-2">
-                    <div className="flex-1 min-w-0">
+                  <div className="flex-1 min-w-0">
                       <p className="text-white font-semibold text-sm">
                         {item.product?.name || "Unknown Product"}
                       </p>
@@ -779,15 +779,15 @@ export default function AgentDashboard({ userName }: AgentDashboardProps) {
                       {item.product?.category && (
                         <p className="text-xs text-slate-500 mt-1">{item.product.category}</p>
                       )}
-                    </div>
+                  </div>
                     <div className="text-right">
                       <p className="text-2xl font-bold text-cyan-400">{item.quantity}</p>
                       <p className="text-xs text-slate-400">{item.unit || "units"}</p>
-                    </div>
                   </div>
-                </Card>
-              ))}
-            </div>
+                </div>
+              </Card>
+            ))}
+          </div>
 
                   {/* Desktop Table View */}
                   <div className="hidden lg:block bg-slate-800 border border-slate-700 rounded-lg overflow-hidden">
@@ -856,7 +856,7 @@ export default function AgentDashboard({ userName }: AgentDashboardProps) {
                 </Card>
               )
             })()}
-          </div>
+        </div>
         </TabsContent>
 
       </Tabs>
