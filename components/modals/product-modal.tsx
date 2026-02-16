@@ -406,7 +406,7 @@ export default function ProductModal({ product, onClose, onSave }: ProductModalP
       console.log("Using scanner ID:", scannerId)
       
       // Wait for DOM to be ready - Chrome needs extra time to avoid auto-stop
-      await new Promise(resolve => setTimeout(resolve, isMobile ? 700 : isChrome ? 600 : 300))
+      await new Promise(resolve => setTimeout(resolve, isMobile && isChrome ? 900 : isMobile ? 700 : isChrome ? 600 : 300))
       await new Promise(resolve => requestAnimationFrame(resolve))
       
       const html5QrCode = new Html5Qrcode(scannerId)
@@ -422,31 +422,46 @@ export default function ProductModal({ product, onClose, onSave }: ProductModalP
       
       // Determine camera configuration
       // preferBackCamera = back (environment) for barcode scanning; userFacing retry = front (user)
-      let cameraConfig: string | { facingMode: string }
+      // Chrome: use ideal (not exact) for facingMode so browser can fallback; use deviceId when possible
+      let cameraConfig: string | { facingMode: string } | { facingMode: { ideal: string } }
       const useBack = preferBackCamera && retryMode !== "userFacing" && retryMode !== "constraintsOnly"
       
       if (cameras.length > 0) {
         if (retryMode === "userFacing" || retryMode === "constraintsOnly") {
           cameraConfig = { facingMode: "user" }
         } else if (useBack) {
-          // Try back camera first (preferred for barcode scanning)
-          const backCamera = cameras.find(cam => 
-            cam.label.toLowerCase().includes("back") || 
-            cam.label.toLowerCase().includes("rear") ||
-            cam.label.toLowerCase().includes("environment")
-          )
-          cameraConfig = backCamera ? backCamera.id : { facingMode: "environment" }
+          // Try back camera by label (Chrome Android may use various labels)
+          const backCamera = cameras.find(cam => {
+            const label = (cam.label || "").toLowerCase()
+            return label.includes("back") || label.includes("rear") || label.includes("environment") ||
+              label.includes("facing back")
+          })
+          // Fallback: on phones with 2 cameras, use the one that's not front (often back is second)
+          const frontCam = cameras.find(c => (c.label || "").toLowerCase().includes("front") || (c.label || "").toLowerCase().includes("user"))
+          const fallbackBack = cameras.length >= 2 && !backCamera && frontCam
+            ? cameras.find(c => c.id !== frontCam.id) || cameras[cameras.length - 1]
+            : null
+          if (backCamera) {
+            cameraConfig = backCamera.id
+          } else if (fallbackBack) {
+            cameraConfig = fallbackBack.id
+          } else {
+            // Use ideal (not exact) - Chrome can fallback to any camera if environment fails
+            cameraConfig = { facingMode: { ideal: "environment" } } as any
+          }
         } else {
           // Front camera
-          const frontCamera = cameras.find(cam => 
-            cam.label.toLowerCase().includes("front") || 
-            cam.label.toLowerCase().includes("user") ||
-            cam.label.toLowerCase().includes("face")
-          )
+          const frontCamera = cameras.find(cam => {
+            const label = (cam.label || "").toLowerCase()
+            return label.includes("front") || label.includes("user") || label.includes("face") || label.includes("facing user")
+          })
           cameraConfig = frontCamera ? frontCamera.id : { facingMode: "user" }
         }
       } else {
-        cameraConfig = useBack ? { facingMode: "environment" } : { facingMode: "user" }
+        // No camera list - use ideal for Chrome compatibility (allows fallback)
+        cameraConfig = useBack 
+          ? ({ facingMode: { ideal: "environment" } } as any) 
+          : { facingMode: "user" }
       }
       
       // Calculate qrbox size based on screen size (mobile-friendly)
