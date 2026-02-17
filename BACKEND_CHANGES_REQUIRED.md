@@ -16,6 +16,7 @@
 | **Cost price per serial** | Cost price saved per serial number | Store in `product_serial_numbers.cost_price` |
 | **Selling price (separate)** | Super Admin sets selling price per product; different from cost | `products.selling_price` column; separate from `unit_price` |
 | **Quotations** | Agent quotation amounts use selling price, not cost | Use `selling_price` for quotation line-item rates and amounts |
+| **Serial numbers by category** | Panels, Inverters, Meter: required. Other categories: optional | Accept `stock_to_add` without `serial_numbers`; accept product creation with quantity but no serials |
 
 ---
 
@@ -62,17 +63,23 @@ VALUES
 
 Use `default_price` for all, or `serial_number_prices[serial_number]` for each.
 
-#### B. Store serial numbers on add stock
+#### B. Store serial numbers on add stock (or add stock without serials)
 
-**PUT /api/products/:id** – When adding stock with serial numbers:
+**PUT /api/products/:id** – When adding stock:
 
+*With serial numbers (Panels, Inverters, Meter):*
 ```
 stock_to_add: 2
 serial_numbers: ["SN004", "SN005"]
 default_price: 1500
 ```
-
 Insert rows into `product_serial_numbers` for each serial, linked to the product.
+
+*Without serial numbers (other categories – optional):*
+```
+stock_to_add: 5
+```
+Update product quantity only. Do not require `serial_numbers`.
 
 #### C. Return serial numbers on GET
 
@@ -164,7 +171,52 @@ ALTER TABLE product_serial_numbers ADD COLUMN IF NOT EXISTS cost_price DECIMAL(1
 
 ---
 
-## 6. Database Schema
+## 6. Serial Numbers Optional for Some Categories
+
+**Requirement:** Serial numbers are **required** for Panels, Inverters, and Meter. For **other categories**, serial numbers are **optional** when adding stock.
+
+**Frontend behavior:**
+- Panels, Inverters, Meter: Frontend always sends `serial_numbers` when quantity/stock_to_add > 0
+- Other categories: Frontend may send `stock_to_add` **without** `serial_numbers`
+
+**Backend must:**
+1. **PUT /api/products/:id** – Accept `stock_to_add` without `serial_numbers`
+   - When `stock_to_add` is provided but `serial_numbers` is omitted or empty: update product quantity only, do not create serial number records
+   - When both are provided: create serial number records as usual
+
+2. **POST /api/products** – Accept product creation with `quantity` > 0 but without `serial_numbers`
+   - When `quantity` is provided but `serial_numbers` is omitted or empty: create product with quantity, do not create serial number records
+   - When both are provided: create product and serial number records as usual
+
+**Example – Add stock without serial numbers (optional category):**
+```
+PUT /api/products/:id
+Content-Type: application/json (or multipart/form-data)
+
+stock_to_add: 5
+```
+*No serial_numbers field – backend should increment product quantity by 5.*
+
+### Assign serial numbers to existing stock (Panels, Inverters, Meter)
+
+When a product has stock but no serial numbers assigned (e.g. created before serial tracking), the frontend allows "assigning" serial numbers to existing stock:
+
+```
+PUT /api/products/:id
+Content-Type: multipart/form-data
+
+stock_to_add: 0
+serial_numbers: ["SN001", "SN002"]
+product_name: "Product Name"
+product_category: "Meters"
+default_price: 2300
+```
+
+**Backend must:** When `stock_to_add` is 0 but `serial_numbers` is provided, assign these serial numbers to existing unassigned stock units (do not increment quantity).
+
+---
+
+## 7. Database Schema
 
 ```sql
 -- products table
@@ -191,7 +243,9 @@ CREATE TABLE IF NOT EXISTS product_serial_numbers (
 ## Verification Checklist
 
 - [ ] **POST /api/products** with `serial_numbers` → rows inserted into `product_serial_numbers`
+- [ ] **POST /api/products** with `quantity` but no `serial_numbers` → product created, quantity updated (optional categories)
 - [ ] **PUT /api/products/:id** with `stock_to_add` and `serial_numbers` → new rows inserted
+- [ ] **PUT /api/products/:id** with `stock_to_add` but no `serial_numbers` → quantity updated only (optional categories)
 - [ ] **GET /api/products/:id/serial-numbers** → returns array of serial numbers for that product
 - [ ] **GET /api/products** → returns `quantity` or `central_stock` per product
 - [ ] **GET /api/products/:id** → returns `quantity`/`central_stock` and `selling_price`

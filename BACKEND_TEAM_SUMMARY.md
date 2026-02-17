@@ -34,6 +34,8 @@
 
 3. **PUT /api/products/:id** – When adding stock with `serial_numbers`, insert rows into `product_serial_numbers` the same way.
 
+**Serial numbers by category:** Panels, Inverters, Meter require serial numbers. Other categories: optional. Backend must accept `stock_to_add` **without** `serial_numbers` (update quantity only).
+
 ---
 
 ## 📋 API Contract Summary
@@ -55,7 +57,7 @@
 | Field | Type | When |
 |-------|------|------|
 | `stock_to_add` | number | When adding stock |
-| `serial_numbers` | JSON string array | When adding stock with serials |
+| `serial_numbers` | JSON string array | Optional – when adding stock with serials (required for Panels, Inverters, Meter; optional for others) |
 | `default_price` or `serial_number_prices` | number / object | Same as POST |
 | `product_name`, `product_category` | string | Optional |
 

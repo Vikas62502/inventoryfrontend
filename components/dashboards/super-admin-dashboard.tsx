@@ -1205,8 +1205,8 @@ export default function SuperAdminDashboard({ userName }: SuperAdminDashboardPro
           )}
         </TabsContent>
 
-        <TabsContent value="selling-price" className="mt-[60px] md:mt-0 space-y-6">
-          <div className="space-y-4">
+        <TabsContent value="selling-price" className="mt-[60px] md:mt-0 space-y-6 overflow-x-hidden">
+          <div className="space-y-4 min-w-0">
             <h2 className="text-xl font-bold text-white flex items-center gap-2">
               <DollarSign className="w-5 h-5 text-emerald-500" />
               Set Selling Price
@@ -1214,21 +1214,21 @@ export default function SuperAdminDashboard({ userName }: SuperAdminDashboardPro
             <p className="text-slate-400 text-sm">
               Set the selling price for each product. By default, the max cost price from registered stock is used. You can override with a custom price per product.
             </p>
-            <div className="flex flex-col sm:flex-row gap-2">
-              <div className="flex-1 relative">
-                <Search className="w-4 h-4 absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" />
+            <div className="flex flex-col sm:flex-row gap-2 min-w-0">
+              <div className="flex-1 min-w-0 relative">
+                <Search className="w-4 h-4 absolute left-3 top-1/2 -translate-y-1/2 text-slate-400 pointer-events-none" />
                 <input
                   type="text"
                   placeholder="Search products..."
                   value={searchTerm}
                   onChange={(e) => setSearchTerm(e.target.value)}
-                  className="w-full pl-10 pr-4 py-2 bg-slate-700 border border-slate-600 rounded-lg text-white placeholder-slate-500 focus:outline-none focus:border-blue-500"
+                  className="w-full min-w-0 pl-10 pr-4 py-2 bg-slate-700 border border-slate-600 rounded-lg text-white placeholder-slate-500 focus:outline-none focus:border-blue-500"
                 />
               </div>
               <select
                 value={categoryFilter || ""}
                 onChange={(e) => setCategoryFilter(e.target.value || null)}
-                className="w-full sm:w-auto px-4 py-2 bg-slate-700 border border-slate-600 rounded-lg text-white focus:outline-none focus:border-blue-500"
+                className="w-full sm:w-auto min-w-0 px-4 py-2 bg-slate-700 border border-slate-600 rounded-lg text-white focus:outline-none focus:border-blue-500"
               >
                 <option value="">All Categories</option>
                 {categories.map((cat, index) => (
@@ -1238,20 +1238,20 @@ export default function SuperAdminDashboard({ userName }: SuperAdminDashboardPro
                 ))}
               </select>
             </div>
-            <div className="space-y-3 max-h-[600px] overflow-y-auto pr-1">
+            <div className="space-y-3 max-h-[600px] overflow-y-auto overflow-x-hidden pr-1">
               {filteredProducts.length > 0 ? (
                 filteredProducts.map((product) => (
-                  <Card key={product.id} className="bg-slate-800 border-slate-700 p-3 sm:p-4">
-                    <div className="flex flex-col sm:flex-row items-start justify-between gap-3">
-                      <div className="flex-1 min-w-0">
-                        <h3 className="font-semibold text-white mb-1 truncate text-sm sm:text-base">{product.name}</h3>
+                  <Card key={product.id} className="bg-slate-800 border-slate-700 p-3 sm:p-4 overflow-hidden">
+                    <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
+                      <div className="min-w-0 flex-1 overflow-hidden">
+                        <h3 className="font-semibold text-white mb-1 text-sm sm:text-base line-clamp-2 break-words">{product.name}</h3>
                         <div className="flex flex-wrap gap-3 text-xs sm:text-sm">
                           <span className="text-slate-400">Category: <span className="text-white">{product.category}</span></span>
                           <span className="text-slate-400">Stock: <span className="text-cyan-400 font-medium">{product.quantity || 0}</span></span>
                           <span className="text-slate-400">Selling Price: <span className="text-emerald-400 font-medium">₹{((product as Product).selling_price ?? (product as Product).unit_price ?? (product as Product).price ?? 0).toLocaleString()}</span></span>
                         </div>
                       </div>
-                      <div className="flex gap-2 flex-shrink-0">
+                      <div className="flex gap-2 flex-shrink-0 flex-wrap sm:flex-nowrap">
                         <Button
                           type="button"
                           onClick={() => {
@@ -1261,7 +1261,7 @@ export default function SuperAdminDashboard({ userName }: SuperAdminDashboardPro
                           }}
                           size="sm"
                           variant="outline"
-                          className="border-slate-600 text-slate-300"
+                          className="border-slate-600 text-slate-300 shrink-0"
                           title="View serial numbers for this product"
                         >
                           <Eye className="w-4 h-4" />
@@ -1273,9 +1273,9 @@ export default function SuperAdminDashboard({ userName }: SuperAdminDashboardPro
                             setShowProductModal(true)
                           }}
                           size="sm"
-                          className="bg-emerald-600 hover:bg-emerald-700 text-white"
+                          className="bg-emerald-600 hover:bg-emerald-700 text-white shrink-0 whitespace-nowrap"
                         >
-                          <DollarSign className="w-4 h-4 mr-1" />
+                          <DollarSign className="w-4 h-4 mr-1 shrink-0" />
                           Set Price
                         </Button>
                       </div>

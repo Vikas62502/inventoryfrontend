@@ -83,6 +83,7 @@ export default function ProductModal({ product, onClose, onSave }: ProductModalP
   
   // Serial numbers tracking
   const [serialNumbers, setSerialNumbers] = useState<string[]>([])
+  const [serialNumbersForExisting, setSerialNumbersForExisting] = useState<string[]>([]) // Assign to existing stock (no serials yet)
   const [serialNumberInput, setSerialNumberInput] = useState<string>("")
   const [serialNumberMethod, setSerialNumberMethod] = useState<"manual" | "barcode" | "excel">("manual")
   const [serialNumberExcelFile, setSerialNumberExcelFile] = useState<File | null>(null)
@@ -103,8 +104,10 @@ export default function ProductModal({ product, onClose, onSave }: ProductModalP
   const [preferBackCamera, setPreferBackCamera] = useState(!isChromeForCamera)
   const qrCodeScannerRef = useRef<Html5Qrcode | null>(null)
   const scanStartTimeRef = useRef<number>(0) // Ignore false-positive scans in first ~1.5s
+  const scanTargetRef = useRef<"add" | "existing">("add") // When scanning: add to new stock or assign to existing
   const scannerElementId = "barcode-scanner"
   const scannerElementIdEdit = "barcode-scanner-edit"
+  const scannerElementIdAssign = "barcode-scanner-assign"
   
   // Step tracking for new product creation
   const [currentStep, setCurrentStep] = useState<1 | 2>(1)
@@ -189,6 +192,7 @@ export default function ProductModal({ product, onClose, onSave }: ProductModalP
       setExistingStock(currentStock)
       setStockToAdd(0) // Reset stock to add when product changes
       setSerialNumbers([]) // Reset serial numbers
+      setSerialNumbersForExisting([]) // Reset assign-to-existing serials
       setSerialNumberInput("") // Reset serial number input
       setSerialNumberExcelFile(null) // Reset Excel file
       setSerialNumberMethod("manual") // Reset to manual method
@@ -207,15 +211,22 @@ export default function ProductModal({ product, onClose, onSave }: ProductModalP
             setLoadingSerialNumbers(true)
             const serials = await serialNumbersApi.getByProduct(product.id!)
             const fromApi = Array.isArray(serials) ? serials : []
-            // Fallback: if API returns empty but product has serial_numbers (e.g. from create response), use those
-            if (fromApi.length === 0 && product.serial_numbers && Array.isArray(product.serial_numbers) && product.serial_numbers.length > 0) {
-              const fallback: SerialNumber[] = product.serial_numbers.map((sn, i) => ({
-                id: `fallback-${i}-${sn}`,
-                product_id: product.id!,
-                serial_number: sn,
-                created_at: new Date().toISOString(),
-              }))
-              setAssignedSerialNumbers(fallback)
+            // Fallback: if /serial-numbers returns empty, try GET /products/:id for serial_numbers
+            if (fromApi.length === 0) {
+              const fromProduct = product.serial_numbers && Array.isArray(product.serial_numbers) && product.serial_numbers.length > 0
+                ? product.serial_numbers
+                : (await productsApi.getById(product.id!)).serial_numbers
+              if (fromProduct?.length) {
+                const fallback: SerialNumber[] = fromProduct.map((sn, i) => ({
+                  id: `fallback-${i}-${sn}`,
+                  product_id: product.id!,
+                  serial_number: typeof sn === "string" ? sn : (sn as any).serial_number,
+                  created_at: new Date().toISOString(),
+                }))
+                setAssignedSerialNumbers(fallback)
+              } else {
+                setAssignedSerialNumbers(fromApi)
+              }
             } else {
               setAssignedSerialNumbers(fromApi)
             }
@@ -253,6 +264,13 @@ export default function ProductModal({ product, onClose, onSave }: ProductModalP
       }
     }
   }, [product, referenceData])
+
+  // Barcode/serial numbers required for Panels, Inverters, Meter; optional for others
+  const BARCODE_REQUIRED_CATEGORIES = ["panels", "inverter", "inverters", "meter", "meters"]
+  const isBarcodeRequiredForCategory = (category: string) => {
+    const c = (category || "").toLowerCase().trim()
+    return BARCODE_REQUIRED_CATEGORIES.includes(c)
+  }
 
   // Filter products based on selected category
   const filteredProducts = formData.category 
@@ -385,19 +403,23 @@ export default function ProductModal({ product, onClose, onSave }: ProductModalP
       let scannerId = scannerElementId
       const createModeElement = document.getElementById(scannerElementId)
       const editModeElement = document.getElementById(scannerElementIdEdit)
+      const assignModeElement = document.getElementById(scannerElementIdAssign)
       
-      console.log("Scanner elements - Create:", !!createModeElement, "Edit:", !!editModeElement)
-      
-      if (!createModeElement && !editModeElement) {
-        // Wait a bit and try again
-        await new Promise(resolve => setTimeout(resolve, 200))
-        if (!document.getElementById(scannerElementId) && !document.getElementById(scannerElementIdEdit)) {
-          throw new Error("Scanner element not found. Please try again.")
-        }
+      if (assignModeElement) {
+        scannerId = scannerElementIdAssign
+      } else if (!createModeElement && editModeElement) {
+        scannerId = scannerElementIdEdit
+      } else if (createModeElement) {
+        scannerId = scannerElementId
+      } else if (editModeElement) {
+        scannerId = scannerElementIdEdit
       }
       
-      if (!createModeElement) {
-        scannerId = scannerElementIdEdit
+      if (!createModeElement && !editModeElement && !assignModeElement) {
+        await new Promise(resolve => setTimeout(resolve, 200))
+        if (!document.getElementById(scannerElementId) && !document.getElementById(scannerElementIdEdit) && !document.getElementById(scannerElementIdAssign)) {
+          throw new Error("Scanner element not found. Please try again.")
+        }
       }
       
       // Check if element exists
@@ -520,13 +542,28 @@ export default function ProductModal({ product, onClose, onSave }: ProductModalP
             qrCodeScannerRef.current = null
           }
           
-          // Then process the scanned serial number
-          if (newSerial && !serialNumbers.includes(newSerial)) {
-            setSerialNumbers([...serialNumbers, newSerial])
+          // Then process the scanned serial number (add to new stock or assign to existing)
+          if (newSerial) {
+            if (scanTargetRef.current === "existing") {
+              setSerialNumbersForExisting(prev => {
+                if (prev.includes(newSerial)) {
+                  setError("Serial number already added")
+                  setTimeout(() => setError(null), 3000)
+                  return prev
+                }
+                return [...prev, newSerial]
+              })
+            } else {
+              setSerialNumbers(prev => {
+                if (prev.includes(newSerial)) {
+                  setError("Serial number already added")
+                  setTimeout(() => setError(null), 3000)
+                  return prev
+                }
+                return [...prev, newSerial]
+              })
+            }
             setSerialNumberInput("")
-          } else if (serialNumbers.includes(newSerial)) {
-            setError("Serial number already added")
-            setTimeout(() => setError(null), 3000)
           }
         },
         (errorMessage) => {
@@ -651,6 +688,21 @@ export default function ProductModal({ product, onClose, onSave }: ProductModalP
     }
   }, [serialNumberMethod])
 
+  // For Panels, Inverters, Meter: default to Barcode Scanner when serial entry appears (Add Stock or Assign to existing)
+  const prevStockToAddRef = useRef(0)
+  const assignSectionShownRef = useRef(false)
+  useEffect(() => {
+    const assignShown = !!(product?.id && existingStock > 0 && assignedSerialNumbers.length === 0 && isBarcodeRequiredForCategory(formData.category))
+    if (stockToAdd > 0 && prevStockToAddRef.current === 0 && isBarcodeRequiredForCategory(formData.category)) {
+      setSerialNumberMethod("barcode")
+    } else if (assignShown && !assignSectionShownRef.current) {
+      setSerialNumberMethod("barcode")
+      assignSectionShownRef.current = true
+    }
+    if (!assignShown) assignSectionShownRef.current = false
+    prevStockToAddRef.current = stockToAdd
+  }, [stockToAdd, formData.category, product?.id, existingStock, assignedSerialNumbers.length])
+
   const handleImageChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0]
     if (file) {
@@ -717,6 +769,15 @@ export default function ProductModal({ product, onClose, onSave }: ProductModalP
         productData.unit_price = formData.price
       } else {
         productData.unit_price = 0
+      }
+      
+      // Panels, Inverters, Meter: serial numbers required when quantity > 0
+      if (quantity > 0 && isBarcodeRequiredForCategory(categoryName)) {
+        if (serialNumbers.length === 0 && !serialNumberExcelFile) {
+          setError("Serial numbers are required for Panels, Inverters, and Meter categories. Please enter or scan serial numbers.")
+          setLoading(false)
+          return
+        }
       }
       
       // If quantity > 0 and serial numbers are provided, validate and include them
@@ -820,8 +881,20 @@ export default function ProductModal({ product, onClose, onSave }: ProductModalP
         // When editing: add new stock to existing stock
         finalQuantity = existingStock + stockToAdd
         
-        // Validate serial numbers if stock is being added
-        if (stockToAdd > 0 && serialNumbers.length !== stockToAdd && !serialNumberExcelFile) {
+        // Validate serial numbers if stock is being added (required for Panels, Inverters, Meter)
+        if (stockToAdd > 0 && isBarcodeRequiredForCategory(categoryName)) {
+          if (serialNumbers.length === 0 && !serialNumberExcelFile) {
+            setError("Serial numbers are required for Panels, Inverters, and Meter categories. Please enter or scan serial numbers.")
+            setLoading(false)
+            return
+          }
+          if (serialNumbers.length > 0 && serialNumbers.length !== stockToAdd && !serialNumberExcelFile) {
+            setError(`Please enter ${stockToAdd} serial numbers. Currently have ${serialNumbers.length}.`)
+            setLoading(false)
+            return
+          }
+        } else if (stockToAdd > 0 && serialNumbers.length > 0 && serialNumbers.length !== stockToAdd && !serialNumberExcelFile) {
+          // Optional categories: if serial numbers provided, count must match
           setError(`Please enter ${stockToAdd} serial numbers. Currently have ${serialNumbers.length}.`)
           setLoading(false)
           return
@@ -874,6 +947,20 @@ export default function ProductModal({ product, onClose, onSave }: ProductModalP
         productData.stock_to_add = stockToAdd
       }
       
+      // Assign serial numbers to existing stock (Panels/Inverters/Meter: stock exists but no serials yet)
+      if (product?.id && stockToAdd === 0 && serialNumbersForExisting.length > 0 && existingStock > 0 && assignedSerialNumbers.length === 0) {
+        if (serialNumbersForExisting.length !== existingStock) {
+          setError(`Please enter ${existingStock} serial numbers for existing stock. Currently have ${serialNumbersForExisting.length}.`)
+          setLoading(false)
+          return
+        }
+        productData.serial_numbers = serialNumbersForExisting
+        productData.product_name = formData.name
+        productData.product_category = categoryName
+        productData.stock_to_add = 0
+        productData.default_price = defaultPrice || product?.unit_price || product?.price || 0
+      }
+      
       // Include price if provided (for all users)
       // unit_price = cost price (same concept). selling_price = separate field set by Super Admin.
       if (isSuperAdmin && product?.id) {
@@ -902,7 +989,43 @@ export default function ProductModal({ product, onClose, onSave }: ProductModalP
         if (productData.serial_numbers || imageFile) {
           // Update using FormData for file uploads or serial numbers
           const updated = await productsApi.update(product.id, updateData)
-          onSave(updated)
+          // Use returned serial_numbers to refresh modal list immediately; fallback to what we sent
+          const returnedSerials = (updated as any).serial_numbers
+          if (returnedSerials?.length) {
+            const refreshed: SerialNumber[] = returnedSerials.map((sn: string | { serial_number: string; id?: string }, i: number) => {
+              const val = typeof sn === "string" ? sn : sn.serial_number
+              return {
+                id: typeof sn === "object" && (sn as any).id ? (sn as any).id : `new-${i}-${val}`,
+                product_id: product.id!,
+                serial_number: val,
+                cost_price: serialNumberPrices[val] ?? productData.default_price ?? defaultPrice ?? product?.unit_price ?? product?.price ?? 0
+              }
+            })
+            setAssignedSerialNumbers(refreshed)
+          } else if (productData.serial_numbers?.length) {
+            const serialsSent = productData.serial_numbers as string[]
+            const defaultCost = defaultPrice || product?.unit_price || product?.price || 0
+            const newSerials: SerialNumber[] = serialsSent.map((sn, i) => ({
+              id: `new-${i}-${sn}`,
+              product_id: product.id!,
+              serial_number: sn,
+              cost_price: serialNumberPrices[sn] ?? productData.default_price ?? defaultCost
+            }))
+            const isAssign = stockToAdd === 0 && serialNumbersForExisting.length > 0
+            setAssignedSerialNumbers(prev => isAssign ? newSerials : [...prev, ...newSerials])
+          }
+          // Pass serial_numbers to parent so they show on View All when modal reopens (API may not return them)
+          const serialsSent = productData.serial_numbers as string[] | undefined
+          const isAssign = stockToAdd === 0 && serialNumbersForExisting.length > 0
+          const fullSerials = serialsSent?.length
+            ? isAssign
+              ? serialsSent
+              : [...assignedSerialNumbers.map((s) => s.serial_number), ...serialsSent]
+            : (updated as any).serial_numbers
+          const updatedWithSerials = fullSerials?.length
+            ? { ...updated, serial_numbers: (updated as any).serial_numbers ?? fullSerials }
+            : updated
+          onSave(updatedWithSerials)
         } else {
           // Regular update without files
         const updated = await productsApi.update(product.id, productData)
@@ -968,6 +1091,11 @@ export default function ProductModal({ product, onClose, onSave }: ProductModalP
                 <span className="text-xs text-slate-400 ml-2 font-normal">
                   ({serialNumbers.length} of {formData.quantity} entered)
                 </span>
+                {formData.quantity > 0 && (
+                  <span className={`text-xs ml-2 font-normal ${isBarcodeRequiredForCategory(formData.category) ? "text-amber-400" : "text-slate-500"}`}>
+                    {isBarcodeRequiredForCategory(formData.category) ? "(Required for Panels, Inverters, Meter)" : "(Optional for other categories)"}
+                  </span>
+                )}
               </label>
               
               {/* Method Selection */}
@@ -1653,7 +1781,43 @@ Example: SN001, SN002, SN003"
                   </div>
                   <button
                     type="button"
-                    onClick={() => setShowSerialNumbersModal(true)}
+                    onClick={async () => {
+                      if (product?.id) {
+                        setLoadingSerialNumbers(true)
+                        try {
+                          const serials = await serialNumbersApi.getByProduct(product.id)
+                          const fromApi = Array.isArray(serials) ? serials : []
+                          if (fromApi.length === 0) {
+                            const fullProduct = await productsApi.getById(product.id)
+                            const fromProduct = fullProduct.serial_numbers ?? product.serial_numbers
+                            if (fromProduct?.length) {
+                              setAssignedSerialNumbers(fromProduct.map((sn, i) => ({
+                                id: `fallback-${i}-${typeof sn === "string" ? sn : (sn as any).serial_number}`,
+                                product_id: product.id!,
+                                serial_number: typeof sn === "string" ? sn : (sn as any).serial_number,
+                                created_at: new Date().toISOString(),
+                              })))
+                            } else {
+                              setAssignedSerialNumbers([])
+                            }
+                          } else {
+                            setAssignedSerialNumbers(fromApi)
+                          }
+                        } catch {
+                          if (product.serial_numbers?.length) {
+                            setAssignedSerialNumbers(product.serial_numbers.map((sn, i) => ({
+                              id: `fallback-${i}-${sn}`,
+                              product_id: product.id!,
+                              serial_number: sn,
+                              created_at: new Date().toISOString(),
+                            })))
+                          }
+                        } finally {
+                          setLoadingSerialNumbers(false)
+                        }
+                      }
+                      setShowSerialNumbersModal(true)
+                    }}
                     disabled={loadingSerialNumbers}
                     className="flex items-center gap-2 px-3 py-2 bg-blue-600 hover:bg-blue-700 text-white rounded-lg transition text-sm disabled:opacity-50 disabled:cursor-not-allowed"
                     title="View all serial numbers"
@@ -1754,6 +1918,9 @@ Example: SN001, SN002, SN003"
                     <span className="text-xs text-slate-400 ml-2 font-normal">
                       ({serialNumbers.length} of {stockToAdd} entered)
                     </span>
+                    <span className={`text-xs ml-2 font-normal ${isBarcodeRequiredForCategory(formData.category) ? "text-amber-400" : "text-slate-500"}`}>
+                      {isBarcodeRequiredForCategory(formData.category) ? "(Required for Panels, Inverters, Meter)" : "(Optional for other categories)"}
+                    </span>
                   </label>
                   
                   {/* Method Selection */}
@@ -1844,7 +2011,7 @@ Example: SN001, SN002, SN003"
                               onClick={(e) => {
                                 e.preventDefault()
                                 e.stopPropagation()
-                                console.log("Start Camera button clicked (edit mode)")
+                                scanTargetRef.current = "add"
                                 startCameraScanning().catch((err) => {
                                   console.error("Error in startCameraScanning:", err)
                                   setScanError(err.message || "Failed to start camera")
