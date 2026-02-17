@@ -3,8 +3,9 @@
 import { useState, useEffect, useMemo } from "react"
 import { Card } from "@/components/ui/card"
 import { Button } from "@/components/ui/button"
-import { Plus, Users, ShoppingCart, CreditCard, TrendingUp, BarChart3, Target, Loader2, RotateCcw, Search, Download, Package } from "lucide-react"
+import { Plus, Users, ShoppingCart, CreditCard, TrendingUp, BarChart3, Target, Loader2, RotateCcw, Search, Download, Package, Edit2 } from "lucide-react"
 import SalesModal from "@/components/modals/sales-modal"
+import SaleEditModal from "@/components/modals/sale-edit-modal"
 import StockReturnModal from "@/components/modals/stock-return-modal"
 import { Tabs, TabsList, TabsTrigger, TabsContent } from "@/components/ui/tabs"
 import { useSalesState } from "@/hooks/use-sales-state"
@@ -29,6 +30,7 @@ export default function AgentDashboard({ userName }: AgentDashboardProps) {
   const [filterType, setFilterType] = useState<"all" | "B2B" | "B2C">("all")
   const [salesSearchQuery, setSalesSearchQuery] = useState("")
   const [downloadingSaleId, setDownloadingSaleId] = useState<string | null>(null)
+  const [editingSaleId, setEditingSaleId] = useState<string | null>(null)
   const [activeTab, setActiveTab] = useState<string>("sales")
   const [stockSearchQuery, setStockSearchQuery] = useState("")
   const [quotations, setQuotations] = useState<Quotation[]>([])
@@ -542,6 +544,7 @@ export default function AgentDashboard({ userName }: AgentDashboardProps) {
                   <th className="px-4 xl:px-6 py-3 text-left text-xs xl:text-sm font-semibold text-slate-300">Type</th>
                   <th className="px-4 xl:px-6 py-3 text-left text-xs xl:text-sm font-semibold text-slate-300">Amount</th>
                   <th className="px-4 xl:px-6 py-3 text-left text-xs xl:text-sm font-semibold text-slate-300">Payment</th>
+                  <th className="px-4 xl:px-6 py-3 text-left text-xs xl:text-sm font-semibold text-slate-300">Status</th>
                   <th className="px-4 xl:px-6 py-3 text-left text-xs xl:text-sm font-semibold text-slate-300">Date</th>
                   <th className="px-4 xl:px-6 py-3 text-left text-xs xl:text-sm font-semibold text-slate-300">Actions</th>
                 </tr>
@@ -576,32 +579,62 @@ export default function AgentDashboard({ userName }: AgentDashboardProps) {
                           </span>
                         )}
                       </td>
+                      <td className="px-4 xl:px-6 py-3 xl:py-4">
+                        {((sale as any).approval_status === "approved" || sale.payment_status === "completed" || (sale as any).paymentStatus === "completed") ? (
+                          <span className="px-2 xl:px-3 py-1 text-xs font-semibold bg-green-500/20 text-green-400 border border-green-500/50 rounded-full">
+                            Approved
+                          </span>
+                        ) : (
+                          <span className="px-2 xl:px-3 py-1 text-xs font-semibold bg-amber-500/20 text-amber-400 border border-amber-500/50 rounded-full">
+                            Pending approval
+                          </span>
+                        )}
+                      </td>
                       <td className="px-4 xl:px-6 py-3 xl:py-4 text-slate-400 text-xs xl:text-sm">
                         {formatDateISO((sale as any).sale_date || sale.saleDate || sale.created_at)}
                       </td>
                       <td className="px-4 xl:px-6 py-3 xl:py-4">
-                        <Button
-                          size="sm"
-                          onClick={() => handleDownloadQuotation(sale)}
-                          disabled={downloadingSaleId === sale.id}
-                          variant="outline"
-                          className="border-blue-600 text-blue-400 hover:bg-blue-950 hover:text-blue-400 hover:brightness-110 text-xs"
-                        >
-                          {downloadingSaleId === sale.id ? (
-                            <Loader2 className="w-3 h-3 xl:w-4 xl:h-4 animate-spin" />
-                          ) : (
-                            <>
-                              <Download className="w-3 h-3 xl:w-4 xl:h-4 mr-1" />
-                              Quote
-                            </>
+                        <div className="flex items-center gap-2">
+                          {/* Edit: only for sales from sales API (not quotations) - agent can edit before approval */}
+                          {!(sale as any).quotation_id && (
+                            <Button
+                              size="sm"
+                              variant="outline"
+                              onClick={() => setEditingSaleId(sale.id)}
+                              className="border-slate-500 text-slate-300 hover:bg-slate-700 text-xs"
+                              title="Edit sale"
+                            >
+                              <Edit2 className="w-3 h-3 xl:w-4 xl:h-4" />
+                            </Button>
                           )}
-                        </Button>
+                          {/* Quote/Download only when approved by Account */}
+                          {((sale as any).approval_status === "approved" || sale.payment_status === "completed" || (sale as any).paymentStatus === "completed") ? (
+                            <Button
+                              size="sm"
+                              onClick={() => handleDownloadQuotation(sale)}
+                              disabled={downloadingSaleId === sale.id}
+                              variant="outline"
+                              className="border-blue-600 text-blue-400 hover:bg-blue-950 hover:text-blue-400 hover:brightness-110 text-xs"
+                            >
+                              {downloadingSaleId === sale.id ? (
+                                <Loader2 className="w-3 h-3 xl:w-4 xl:h-4 animate-spin" />
+                              ) : (
+                                <>
+                                  <Download className="w-3 h-3 xl:w-4 xl:h-4 mr-1" />
+                                  Quote
+                                </>
+                              )}
+                            </Button>
+                          ) : (
+                            <span className="text-xs text-amber-400">Pending approval</span>
+                          )}
+                        </div>
                       </td>
                     </tr>
                   ))
                 ) : (
                   <tr>
-                    <td colSpan={6} className="px-6 py-8 text-center text-slate-400">
+                    <td colSpan={7} className="px-6 py-8 text-center text-slate-400">
                       No sales found
                     </td>
                   </tr>
@@ -643,35 +676,52 @@ export default function AgentDashboard({ userName }: AgentDashboardProps) {
                       </p>
                     </div>
                     <div>
-                      <p className="text-xs text-slate-400 mb-1">Payment</p>
-                      {(sale.payment_status || (sale as any).paymentStatus) === "pending" ? (
-                        <span className="inline-block px-2 py-1 text-xs font-semibold bg-amber-500/20 text-amber-400 border border-amber-500/50 rounded-full">
-                          Pending
+                      <p className="text-xs text-slate-400 mb-1">Status</p>
+                      {((sale as any).approval_status === "approved" || sale.payment_status === "completed" || (sale as any).paymentStatus === "completed") ? (
+                        <span className="inline-block px-2 py-1 text-xs font-semibold bg-green-500/20 text-green-400 border border-green-500/50 rounded-full">
+                          Approved
                         </span>
                       ) : (
-                        <span className="inline-block px-2 py-1 text-xs font-semibold bg-green-500/20 text-green-400 border border-green-500/50 rounded-full">
-                          Completed
+                        <span className="inline-block px-2 py-1 text-xs font-semibold bg-amber-500/20 text-amber-400 border border-amber-500/50 rounded-full">
+                          Pending approval
                         </span>
                       )}
                     </div>
                   </div>
                   
-                  <Button
-                    size="sm"
-                    onClick={() => handleDownloadQuotation(sale)}
-                    disabled={downloadingSaleId === sale.id}
-                    variant="outline"
-                    className="w-full border-blue-600 text-blue-400 hover:bg-blue-950 hover:text-blue-400 hover:brightness-110 text-xs"
-                  >
-                    {downloadingSaleId === sale.id ? (
-                      <Loader2 className="w-4 h-4 animate-spin" />
-                    ) : (
-                      <>
-                        <Download className="w-4 h-4 mr-1" />
-                        Download Quote
-                      </>
+                  <div className="flex gap-2">
+                    {!(sale as any).quotation_id && (
+                      <Button
+                        size="sm"
+                        variant="outline"
+                        onClick={() => setEditingSaleId(sale.id)}
+                        className="flex-1 border-slate-500 text-slate-300 hover:bg-slate-700 text-xs"
+                      >
+                        <Edit2 className="w-4 h-4 mr-1" />
+                        Edit
+                      </Button>
                     )}
-                  </Button>
+                    {((sale as any).approval_status === "approved" || sale.payment_status === "completed" || (sale as any).paymentStatus === "completed") ? (
+                      <Button
+                        size="sm"
+                        onClick={() => handleDownloadQuotation(sale)}
+                        disabled={downloadingSaleId === sale.id}
+                        variant="outline"
+                        className="flex-1 border-blue-600 text-blue-400 hover:bg-blue-950 hover:text-blue-400 hover:brightness-110 text-xs"
+                      >
+                        {downloadingSaleId === sale.id ? (
+                          <Loader2 className="w-4 h-4 animate-spin" />
+                        ) : (
+                          <>
+                            <Download className="w-4 h-4 mr-1" />
+                            Quote
+                          </>
+                        )}
+                      </Button>
+                    ) : (
+                      <span className="flex-1 text-xs text-amber-400 flex items-center justify-center">Pending approval</span>
+                    )}
+                  </div>
                 </div>
               </Card>
             ))
@@ -880,6 +930,17 @@ export default function AgentDashboard({ userName }: AgentDashboardProps) {
           onClose={() => setShowStockReturnModal(false)}
           onSuccess={async () => {
             setShowStockReturnModal(false)
+          }}
+        />
+      )}
+
+      {editingSaleId && (
+        <SaleEditModal
+          saleId={editingSaleId}
+          onClose={() => setEditingSaleId(null)}
+          onSuccess={async (updated) => {
+            await sales.refetch()
+            setEditingSaleId(null)
           }}
         />
       )}

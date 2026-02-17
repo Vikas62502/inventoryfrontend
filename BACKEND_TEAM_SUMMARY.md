@@ -114,10 +114,105 @@ See **BACKEND_CHANGES_COST_PRICE_SELLING_PRICE_SERIALS.md** (Section 4) for deta
 
 ---
 
+---
+
+## 📋 Account Dashboard – Sales List (GET /api/sales)
+
+For the Account role viewing "All Agent Sales", the frontend expects:
+
+| Field | Purpose | Fallbacks |
+|-------|---------|-----------|
+| `created_by_name` or `agent_name` | Agent name in table | `created_by.name`, `user.name` |
+| `created_at` or `sale_date` | Sale date in table | `updated_at` |
+| `approval_status` | `"pending"` \| `"approved"` – when approved, Download button is shown | If absent, uses `payment_status === "completed"` as approved |
+
+**Download button:** Shown only when `approval_status === "approved"` or `payment_status === "completed"`. Otherwise shows "Pending approval".
+
+**Agent approval:** When Account approves an agent (Agents tab → Approve), the agent gets `is_active: true` and can log in and perform actions. Backend should block inactive agents from login and sensitive operations.
+
+---
+
+## 📋 GET /api/sales/:id – Full Sale for Edit
+
+**Required for Edit modal:** When Account or Agent opens Edit, the frontend fetches the full sale. The response must include everything needed to prefill the edit form (same as create).
+
+| Field | Type | Purpose |
+|-------|------|---------|
+| `customer_name` | string | Prefill edit form |
+| `company_name` | string | B2B |
+| `gst_number` | string | B2B |
+| `contact_person` | string | B2B |
+| `customer_email` | string | Prefill |
+| `customer_phone` | string | Prefill |
+| `notes` | string | Prefill |
+| `billing_address` | object | `{ line1, line2?, city, state, postal_code, country }` |
+| `delivery_address` | object | Same structure |
+| `delivery_matches_billing` | boolean | Prefill checkbox |
+| `items` | array | **Required** – line items for edit form |
+
+**Items array** – each element must have:
+
+| Field | Type | Purpose |
+|-------|------|---------|
+| `product_id` | string | Product ID (or `productId`) |
+| `quantity` | number | Quantity |
+| `unit_price` | number | Unit price (or `unitPrice`) |
+| `gst_rate` | number | GST % (or `gstRate`) |
+
+**Note:** Frontend accepts snake_case (`product_id`, `unit_price`, `gst_rate`) or camelCase (`productId`, `unitPrice`, `gstRate`). Same for addresses (`billing_address` / `billingAddress`).
+
+---
+
+## 📋 PUT /api/sales/:id – Agent & Account Edits
+
+**Account role** edits sale (customer, address, **items**, amounts) from Sales tab. **Agent** edits their own sale before Account approval.
+
+| Field | Type | Purpose |
+|-------|------|---------|
+| `approval_status` | `"pending"` \| `"approved"` | Account sets to `"approved"` when approving sale |
+| `customer_name` | string | Editable |
+| `company_name` | string | Editable (B2B) |
+| `gst_number` | string | Editable (B2B) |
+| `contact_person` | string | Editable (B2B) |
+| `customer_email` | string | Editable |
+| `customer_phone` | string | Editable |
+| `notes` | string | Editable |
+| `billing_address` | object | `{ line1, line2?, city, state, postal_code, country }` |
+| `delivery_address` | object | Same structure |
+| `delivery_matches_billing` | boolean | If true, delivery = billing |
+| `items` | array | **Required for full edit** – `[{ product_id, quantity, unit_price, gst_rate }]` |
+| `subtotal` | number | Recalculated from items |
+| `tax_amount` | number | Recalculated from items |
+| `discount_amount` | number | Optional, default 0 |
+| `total_amount` | number | Recalculated |
+
+**Flow:** Agent creates sale → Agent edits (customer, address, **items**, amounts) → Account approves → Quote/Download shown to agent.
+
+---
+
+## 📋 Backend Checklist (Account & Agent)
+
+| # | Change | Endpoint | Priority |
+|---|--------|----------|----------|
+| 1 | `created_by_name` or `agent_name` in sales list | `GET /api/sales` | High |
+| 2 | `created_at` or `sale_date` in sales list | `GET /api/sales` | High |
+| 3 | `approval_status` in sales (or use `payment_status`) | Sales model | Medium |
+| 4 | Account can set `approval_status: "approved"` | `PUT /api/sales/:id` | Medium |
+| 5 | Agent/Account can edit sale (address, customer, **items**, amounts) | `PUT /api/sales/:id` | Medium |
+| 6 | **GET sale by ID returns full `items`** (product_id, quantity, unit_price, gst_rate) | `GET /api/sales/:id` | High |
+| 7 | **PUT accepts `items`, `subtotal`, `tax_amount`, `total_amount`** | `PUT /api/sales/:id` | High |
+| 8 | Block inactive agents from login | `POST /inventory-auth/login` | High |
+| 9 | Support `role: "account"` in user creation | `POST /api/users` | High |
+| 10 | Account can fetch agents | `GET /api/users/agents` or `GET /api/users?role=agent` | High |
+| 11 | Account can approve agents | `PUT /api/users/:id` with `is_active: true` | High |
+
+---
+
 ## 📚 All Documents
 
 | Document | Purpose |
 |----------|---------|
+| **BACKEND_ACCOUNT_DASHBOARD_CHANGES.md** | **Account dashboard** – sales list (agent name, date), approval status, agent approval, account user creation |
 | **BACKEND_CHANGES_REQUIRED.md** | **Consolidated changes** – product map, serial numbers, selling price, stock |
 | **BACKEND_FIX_SERIAL_NUMBERS_NOT_SHOWING.md** | Step-by-step fix for serial numbers not appearing |
 | **BACKEND_CHANGES_FRONTEND_UPDATES.md** | Frontend behavior and payload examples |

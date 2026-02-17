@@ -3,8 +3,10 @@
 import { useState, useEffect, useCallback } from "react"
 import { Card } from "@/components/ui/card"
 import { Button } from "@/components/ui/button"
-import { CheckCircle, XCircle, Loader2, AlertCircle, UserCheck, UserX, Search, Filter, Download, ShoppingCart } from "lucide-react"
+import { CheckCircle, XCircle, Loader2, AlertCircle, UserCheck, UserX, Search, Filter, Download, ShoppingCart, Edit2 } from "lucide-react"
 import { usersApi, salesApi, productsApi } from "@/lib/api"
+import EditUserModal from "@/components/modals/edit-user-modal"
+import SaleEditModal from "@/components/modals/sale-edit-modal"
 import { generateQuotationPDF } from "@/lib/quotation-generator"
 import { formatDateISO } from "@/lib/utils"
 import { Tabs, TabsList, TabsTrigger, TabsContent } from "@/components/ui/tabs"
@@ -29,6 +31,9 @@ export default function AccountDashboard({ userName }: AccountDashboardProps) {
   const [salesSearchQuery, setSalesSearchQuery] = useState("")
   const [salesTypeFilter, setSalesTypeFilter] = useState<"all" | "B2B" | "B2C">("all")
   const [downloadingSaleId, setDownloadingSaleId] = useState<string | null>(null)
+  const [approvingSaleId, setApprovingSaleId] = useState<string | null>(null)
+  const [editingAgent, setEditingAgent] = useState<User | null>(null)
+  const [editingSaleId, setEditingSaleId] = useState<string | null>(null)
   
   // Tab state
   const [activeTab, setActiveTab] = useState<string>("agents")
@@ -157,6 +162,25 @@ export default function AccountDashboard({ userName }: AccountDashboardProps) {
         next.delete(agentId)
         return next
       })
+    }
+  }
+
+  const handleApproveSale = async (saleId: string) => {
+    try {
+      setApprovingSaleId(saleId)
+      setError(null)
+      await salesApi.update(saleId, { approval_status: "approved" } as any)
+      setSales((prev) =>
+        prev.map((s) =>
+          s.id === saleId ? { ...s, approval_status: "approved" } : s
+        )
+      )
+    } catch (err: any) {
+      const errorMsg = err.message || "Failed to approve sale"
+      setError(errorMsg)
+      console.error("Error approving sale:", err)
+    } finally {
+      setApprovingSaleId(null)
     }
   }
 
@@ -422,6 +446,15 @@ export default function AccountDashboard({ userName }: AccountDashboardProps) {
                         </td>
                         <td className="py-4 px-4">
                           <div className="flex items-center justify-end gap-2">
+                            <Button
+                              size="sm"
+                              variant="outline"
+                              onClick={() => setEditingAgent(agent)}
+                              className="border-slate-500 text-slate-300 hover:bg-slate-700"
+                              title="Edit agent"
+                            >
+                              <Edit2 className="w-4 h-4" />
+                            </Button>
                             {isPending ? (
                               <>
                                 <Button
@@ -563,6 +596,7 @@ export default function AccountDashboard({ userName }: AccountDashboardProps) {
                         <th className="text-left py-3 px-4 text-sm font-semibold text-slate-300">Agent</th>
                         <th className="text-left py-3 px-4 text-sm font-semibold text-slate-300">Amount</th>
                         <th className="text-left py-3 px-4 text-sm font-semibold text-slate-300">Date</th>
+                        <th className="text-left py-3 px-4 text-sm font-semibold text-slate-300">Status</th>
                         <th className="text-right py-3 px-4 text-sm font-semibold text-slate-300">Actions</th>
                       </tr>
                     </thead>
@@ -585,7 +619,9 @@ export default function AccountDashboard({ userName }: AccountDashboardProps) {
                               </span>
                             </td>
                             <td className="py-4 px-4">
-                              <p className="text-slate-300 text-sm">{sale.created_by_name || "N/A"}</p>
+                              <p className="text-slate-300 text-sm">
+                                {(sale as any).created_by_name ?? (sale as any).agent_name ?? (sale as any).created_by?.name ?? (sale as any).user?.name ?? "N/A"}
+                              </p>
                             </td>
                             <td className="py-4 px-4">
                               <p className="text-white font-bold text-emerald-400">
@@ -594,34 +630,77 @@ export default function AccountDashboard({ userName }: AccountDashboardProps) {
                             </td>
                             <td className="py-4 px-4">
                               <p className="text-slate-400 text-sm">
-                                {formatDateISO(sale.created_at)}
+                                {formatDateISO((sale as any).created_at ?? (sale as any).sale_date ?? (sale as any).saleDate ?? sale.updated_at)}
                               </p>
                             </td>
                             <td className="py-4 px-4">
-                              <div className="flex items-center justify-end">
+                              {((sale as any).approval_status === "approved" || sale.payment_status === "completed") ? (
+                                <span className="inline-flex items-center gap-1 px-2 py-1 rounded-full text-xs font-medium bg-green-500/10 text-green-500 border border-green-500/20">
+                                  <CheckCircle className="w-3 h-3" />
+                                  Approved
+                                </span>
+                              ) : (
+                                <span className="inline-flex items-center gap-1 px-2 py-1 rounded-full text-xs font-medium bg-amber-500/10 text-amber-500 border border-amber-500/20">
+                                  <AlertCircle className="w-3 h-3" />
+                                  Pending
+                                </span>
+                              )}
+                            </td>
+                            <td className="py-4 px-4">
+                              <div className="flex items-center justify-end gap-2">
                                 <Button
                                   size="sm"
-                                  onClick={() => handleDownloadQuotation(sale)}
-                                  disabled={downloadingSaleId === sale.id}
                                   variant="outline"
-                                  className="border-blue-600 text-blue-400 hover:bg-blue-950 hover:text-blue-400 hover:brightness-110"
+                                  onClick={() => setEditingSaleId(sale.id)}
+                                  className="border-slate-500 text-slate-300 hover:bg-slate-700"
+                                  title="Edit sale"
                                 >
-                                  {downloadingSaleId === sale.id ? (
-                                    <Loader2 className="w-4 h-4 animate-spin" />
-                                  ) : (
-                                    <>
-                                      <Download className="w-4 h-4 mr-1" />
-                                      Download
-                                    </>
-                                  )}
+                                  <Edit2 className="w-4 h-4" />
                                 </Button>
+                                {/* Approve button when sale is pending */}
+                                {((sale as any).approval_status !== "approved" && sale.payment_status !== "completed") && (
+                                  <Button
+                                    size="sm"
+                                    onClick={() => handleApproveSale(sale.id)}
+                                    disabled={approvingSaleId === sale.id}
+                                    className="bg-green-600 hover:bg-green-700 text-white"
+                                  >
+                                    {approvingSaleId === sale.id ? (
+                                      <Loader2 className="w-4 h-4 animate-spin" />
+                                    ) : (
+                                      <>
+                                        <CheckCircle className="w-4 h-4 mr-1" />
+                                        Approve
+                                      </>
+                                    )}
+                                  </Button>
+                                )}
+                                {/* Download only when sale is approved */}
+                                {((sale as any).approval_status === "approved" || sale.payment_status === "completed") && (
+                                  <Button
+                                    size="sm"
+                                    onClick={() => handleDownloadQuotation(sale)}
+                                    disabled={downloadingSaleId === sale.id}
+                                    variant="outline"
+                                    className="border-blue-600 text-blue-400 hover:bg-blue-950 hover:text-blue-400 hover:brightness-110"
+                                  >
+                                    {downloadingSaleId === sale.id ? (
+                                      <Loader2 className="w-4 h-4 animate-spin" />
+                                    ) : (
+                                      <>
+                                        <Download className="w-4 h-4 mr-1" />
+                                        Download
+                                      </>
+                                    )}
+                                  </Button>
+                                )}
                               </div>
                             </td>
                           </tr>
                         ))
                       ) : (
                         <tr>
-                          <td colSpan={6} className="py-8 text-center text-slate-400">
+                          <td colSpan={7} className="py-8 text-center text-slate-400">
                             No sales found
                           </td>
                         </tr>
@@ -634,6 +713,28 @@ export default function AccountDashboard({ userName }: AccountDashboardProps) {
           </div>
         </TabsContent>
       </Tabs>
+
+      {editingAgent && (
+        <EditUserModal
+          user={editingAgent}
+          onClose={() => setEditingAgent(null)}
+          onSuccess={() => {
+            fetchAgents()
+            setEditingAgent(null)
+          }}
+        />
+      )}
+
+      {editingSaleId && (
+        <SaleEditModal
+          saleId={editingSaleId}
+          onClose={() => setEditingSaleId(null)}
+          onSuccess={(updated) => {
+            setSales((prev) => prev.map((s) => (s.id === updated.id ? updated : s)))
+            setEditingSaleId(null)
+          }}
+        />
+      )}
     </div>
   )
 }

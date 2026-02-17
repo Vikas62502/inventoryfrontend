@@ -35,7 +35,7 @@ export default function SuperAdminDashboard({ userName }: SuperAdminDashboardPro
   const [recentlyCreatedSerials, setRecentlyCreatedSerials] = useState<Record<string, string[]>>({})
   const [showApprovalModal, setShowApprovalModal] = useState(false)
   const [showCreateUserModal, setShowCreateUserModal] = useState(false)
-  const [createUserTargetRole, setCreateUserTargetRole] = useState<"admin" | "super-admin-manager">("admin")
+  const [createUserTargetRole, setCreateUserTargetRole] = useState<"admin" | "super-admin-manager" | "account">("admin")
   const [selectedRequest, setSelectedRequest] = useState<StockRequest | null>(null)
   const [editingProduct, setEditingProduct] = useState<Product | null>(null)
   const [searchTerm, setSearchTerm] = useState("")
@@ -1341,6 +1341,26 @@ export default function SuperAdminDashboard({ userName }: SuperAdminDashboardPro
                 >
                   <UserPlus className="w-4 h-4 mr-2" />
                   Create Admin
+                </Button>
+              </Card>
+
+              <Card className="bg-slate-800 border-slate-700 p-6">
+                <h3 className="text-lg font-semibold text-white mb-2 flex items-center gap-2">
+                  <Users className="w-5 h-5 text-cyan-500" />
+                  Account User
+                </h3>
+                <p className="text-slate-400 mb-4 text-sm">
+                  Create an account user with username and password (same flow as admin creation).
+                </p>
+                <Button
+                  onClick={() => {
+                    setCreateUserTargetRole("account")
+                    setShowCreateUserModal(true)
+                  }}
+                  className="bg-cyan-600 hover:bg-cyan-700 text-white w-full"
+                >
+                  <UserPlus className="w-4 h-4 mr-2" />
+                  Create Account
                 </Button>
               </Card>
             </div>

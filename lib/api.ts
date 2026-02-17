@@ -497,11 +497,14 @@ export interface Sale {
   created_by_name?: string
   created_at: string
   updated_at: string
+  // Account approval: when approved, Download is shown; pending = no download
+  approval_status?: "pending" | "approved"
   // Legacy fields for backward compatibility
   productName?: string
   quantity?: number
   totalAmount?: number
   saleDate?: string
+  agent_name?: string
 }
 
 export interface SaleSummary {
