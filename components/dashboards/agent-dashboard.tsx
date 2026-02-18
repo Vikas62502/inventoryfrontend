@@ -3,10 +3,11 @@
 import { useState, useEffect, useMemo } from "react"
 import { Card } from "@/components/ui/card"
 import { Button } from "@/components/ui/button"
-import { Plus, Users, ShoppingCart, CreditCard, TrendingUp, BarChart3, Target, Loader2, RotateCcw, Search, Download, Package, Edit2 } from "lucide-react"
+import { Plus, Users, ShoppingCart, CreditCard, TrendingUp, BarChart3, Target, Loader2, RotateCcw, Search, Download, Package, Edit2, Eye } from "lucide-react"
 import SalesModal from "@/components/modals/sales-modal"
 import SaleEditModal from "@/components/modals/sale-edit-modal"
 import StockReturnModal from "@/components/modals/stock-return-modal"
+import SerialNumbersViewModal from "@/components/modals/serial-numbers-view-modal"
 import { Tabs, TabsList, TabsTrigger, TabsContent } from "@/components/ui/tabs"
 import { useSalesState } from "@/hooks/use-sales-state"
 import { authService } from "@/lib/auth"
@@ -38,6 +39,8 @@ export default function AgentDashboard({ userName }: AgentDashboardProps) {
   const [adminInventory, setAdminInventory] = useState<AdminInventory[]>([])
   const [loadingAdminInventory, setLoadingAdminInventory] = useState(true)
   const [referenceData, setReferenceData] = useState<any[]>([])
+  const [showSerialNumbersModal, setShowSerialNumbersModal] = useState(false)
+  const [serialNumbersProduct, setSerialNumbersProduct] = useState<{ id: string; name: string } | null>(null)
 
   const currentUser = authService.getUser()
   const currentUserId = currentUser?.id
@@ -835,6 +838,20 @@ export default function AgentDashboard({ userName }: AgentDashboardProps) {
                       <p className="text-xs text-slate-400">{item.unit || "units"}</p>
                   </div>
                 </div>
+                  <div className="pt-2 mt-2 border-t border-slate-700">
+                    <Button
+                      size="sm"
+                      variant="outline"
+                      onClick={() => {
+                        setSerialNumbersProduct({ id: item.productId, name: item.product?.name || "Unknown Product" })
+                        setShowSerialNumbersModal(true)
+                      }}
+                      className="border-cyan-600 text-cyan-400 hover:bg-cyan-950 text-xs w-full"
+                    >
+                      <Eye className="w-3 h-3 mr-1" />
+                      View Serial Numbers
+                    </Button>
+                  </div>
               </Card>
             ))}
           </div>
@@ -849,6 +866,7 @@ export default function AgentDashboard({ userName }: AgentDashboardProps) {
                             <th className="px-6 py-3 text-left text-sm font-semibold text-slate-300">Model</th>
                             <th className="px-6 py-3 text-left text-sm font-semibold text-slate-300">Category</th>
                             <th className="px-6 py-3 text-left text-sm font-semibold text-slate-300">Available Stock</th>
+                            <th className="px-6 py-3 text-left text-sm font-semibold text-slate-300">Actions</th>
                           </tr>
                         </thead>
                         <tbody className="divide-y divide-slate-700">
@@ -866,6 +884,20 @@ export default function AgentDashboard({ userName }: AgentDashboardProps) {
                         <td className="px-6 py-4">
                           <span className="text-cyan-400 font-bold text-lg">{item.quantity}</span>
                           <span className="text-slate-400 text-sm ml-1">{item.unit || "units"}</span>
+                        </td>
+                        <td className="px-6 py-4">
+                          <Button
+                            size="sm"
+                            variant="outline"
+                            onClick={() => {
+                              setSerialNumbersProduct({ id: item.productId, name: item.product?.name || "Unknown Product" })
+                              setShowSerialNumbersModal(true)
+                            }}
+                            className="border-cyan-600 text-cyan-400 hover:bg-cyan-950 text-xs"
+                          >
+                            <Eye className="w-3 h-3 mr-1" />
+                            View Serials
+                          </Button>
                         </td>
                       </tr>
                     ))}
@@ -941,6 +973,18 @@ export default function AgentDashboard({ userName }: AgentDashboardProps) {
           onSuccess={async (updated) => {
             await sales.refetch()
             setEditingSaleId(null)
+          }}
+        />
+      )}
+
+      {showSerialNumbersModal && serialNumbersProduct && (
+        <SerialNumbersViewModal
+          productId={serialNumbersProduct.id}
+          productName={serialNumbersProduct.name}
+          adminId={adminId || undefined}
+          onClose={() => {
+            setShowSerialNumbersModal(false)
+            setSerialNumbersProduct(null)
           }}
         />
       )}

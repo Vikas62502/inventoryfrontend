@@ -28,11 +28,11 @@
 1. **POST /api/products** – When request includes `serial_numbers`:
    - Parse `serial_numbers` (JSON array in form data)
    - Create product
-   - Insert one row per serial number into `product_serial_numbers` with: `product_id`, `serial_number`, `cost_price`, `product_name`, `category`
+   - Insert one row per serial number into `product_serial_numbers` with: `product_id`, `serial_number`, `cost_price`, `product_name`, `category`, **`status = 'available'`** (default)
 
-2. **GET /api/products/:id/serial-numbers** – Return array of serial number objects with: `id`, `serial_number`, `cost_price`, `product_name`, `category`, `status`, `created_at`
+2. **GET /api/products/:id/serial-numbers** – Return array of serial number objects with: `id`, `serial_number`, `cost_price`, `product_name`, `category`, `status`, `created_at`. **Products added default to available** so they appear in the dispatch modal.
 
-3. **PUT /api/products/:id** – When adding stock with `serial_numbers`, insert rows into `product_serial_numbers` the same way.
+3. **PUT /api/products/:id** – When adding stock with `serial_numbers`, insert rows into `product_serial_numbers` with **`status = 'available'`**.
 
 **Serial numbers by category:** Panels, Inverters, Meter require serial numbers. Other categories: optional. Backend must accept `stock_to_add` **without** `serial_numbers` (update quantity only).
 
@@ -63,6 +63,8 @@
 
 ### GET /api/products/:id/serial-numbers
 
+**Optional query param:** `?status=available` – return only serials with `status = 'available'` (for dispatch selection).
+
 **Response:** Array of objects with at least:
 ```json
 {
@@ -76,6 +78,63 @@
   "created_at": "2025-01-15T10:30:00Z"
 }
 ```
+
+**Status values:** `available` | `mapped` | `dispatched` | `acknowledged` | `sold` (see **BACKEND_SERIAL_NUMBER_STATUS_LIFECYCLE.md**).
+
+---
+
+## 📋 Serial Number Status & Dispatch
+
+**Lifecycle:** `available` → `mapped` → `dispatched` → `acknowledged` → `sold`
+
+| Status | When |
+|--------|------|
+| **available** | Super Admin adds product with serial numbers |
+| **dispatched** | Super Admin dispatches (selects serials in Review & Dispatch modal) |
+| **acknowledged** | Admin confirms receipt |
+| **sold** | Agent punches in B2B/B2C sale |
+
+### POST /api/stock-requests/:id/dispatch
+
+**New payload field:** `serial_numbers` (map product_id → array of serial number strings)
+
+```json
+{
+  "dispatch_image": "<File>",
+  "serial_number_ranges": { "product_id": { "from": "SN001", "to": "SN005" } },
+  "serial_numbers": {
+    "product_id_1": ["U6077580", "U6077578", "U6077577"],
+    "product_id_2": ["SN001", "SN002"]
+  }
+}
+```
+
+**Backend must:**
+1. Accept `serial_numbers` (JSON: `{ "product_id": ["SN1","SN2",...] }`)
+2. Validate each serial exists and has `status = 'available'`
+3. Update those serials to `status = 'dispatched'`
+4. Link to stock request (e.g. `stock_request_id`, `dispatched_to_admin_id`)
+
+**Admin confirm:** When admin confirms receipt, update linked serials from `dispatched` → `acknowledged`.
+
+**GET /api/stock-requests/:id – Return dispatched serial numbers:** When a request was dispatched with `serial_numbers`, the response must include them so the Confirm Stock Receipt modal can display them. Add either:
+- `dispatched_serial_numbers: { "product_id": ["SN1","SN2",...] }` at the request level, or
+- `serial_numbers: ["SN1","SN2",...]` on each item in `items[]`
+
+**Sale creation:** When agent creates B2B/B2C sale with serial-tracked items, update serials → `sold`.
+
+---
+
+## 📋 Admin & Agent: Stock + Serial Numbers View
+
+**Admin:** "My Stock" tab – option to view serial numbers per product ("View Serials" button).
+
+**Agent:** "Admin Stock" tab – sees their admin's stock and can view serial numbers per product ("View Serial Numbers" button).
+
+**API for admin-scoped serials (agent views admin's stock):**
+- `GET /admin-inventory/admin/:adminId/products/:productId/serial-numbers`
+- Or `GET /serial-numbers?owner_id=:adminId&owner_type=admin&product_id=:productId`
+- Fallback: `GET /products/:productId/serial-numbers`
 
 ---
 
@@ -208,10 +267,25 @@ For the Account role viewing "All Agent Sales", the frontend expects:
 
 ---
 
+## 📋 Backend Checklist (Serial Number Status & Dispatch)
+
+| # | Change | Endpoint / Area | Priority |
+|---|--------|-----------------|----------|
+| 1 | `product_serial_numbers.status` column, default `'available'` | Database | High |
+| 2 | `GET /products/:id/serial-numbers?status=available` returns only available | `GET /api/products/:id/serial-numbers` | Medium |
+| 3 | **POST dispatch accepts `serial_numbers`** (map product_id → string[]) | `POST /api/stock-requests/:id/dispatch` | High |
+| 4 | On dispatch: validate serials exist + status=available, update to `dispatched` | `POST /api/stock-requests/:id/dispatch` | High |
+| 5 | Admin confirm: update linked serials `dispatched` → `acknowledged` | `POST /api/stock-requests/:id/confirm` | Medium |
+| 6 | Sale creation: update serials → `sold` when linked to sale | `POST /api/sales` | Medium |
+
+---
+
 ## 📚 All Documents
 
 | Document | Purpose |
 |----------|---------|
+| **BACKEND_SERIAL_NUMBER_STATUS_LIFECYCLE.md** | **Serial number status** – available → mapped → dispatched → acknowledged → sold; dispatch with selected serials |
+| **BACKEND_SERIAL_NUMBERS_DISPATCH_FIX.md** | **Fix:** Serial numbers not showing in dispatch modal – GET /products/:id/serial-numbers must return data (by product_id or product_name) |
 | **BACKEND_ACCOUNT_DASHBOARD_CHANGES.md** | **Account dashboard** – sales list (agent name, date), approval status, agent approval, account user creation |
 | **BACKEND_CHANGES_REQUIRED.md** | **Consolidated changes** – product map, serial numbers, selling price, stock |
 | **BACKEND_FIX_SERIAL_NUMBERS_NOT_SHOWING.md** | Step-by-step fix for serial numbers not appearing |

@@ -37,6 +37,8 @@ export default function EnhancedRequestApprovalModal({
   const [adminInventory, setAdminInventory] = useState<Record<string, number>>({})
   // Serial number ranges - map of item index to { from: string, to: string }
   const [serialNumberRanges, setSerialNumberRanges] = useState<Record<number, { from: string; to: string }>>({})
+  // Selected serial numbers for dispatch - map of product_id to string[]
+  const [selectedSerialNumbers, setSelectedSerialNumbers] = useState<Record<string, string[]>>({})
   // Current user to check if super admin
   const [currentUser, setCurrentUser] = useState<any>(null)
   // Available serial numbers for each product - map of product_id to SerialNumber[]
@@ -83,12 +85,14 @@ export default function EnhancedRequestApprovalModal({
           }
         }
         
-        // If super admin, fetch available serial numbers for each product
+        // If super admin, fetch available serial numbers (status=available) for each product
         if (currentAdmin?.role === "super-admin" && fullRequestData.items) {
           const serialNumbersMap: Record<string, any[]> = {}
           for (const item of fullRequestData.items) {
             try {
-              const serials = await serialNumbersApi.getByProduct(item.product_id)
+              const product = item.product || productsMap[item.product_id]
+              const productName = product?.name
+              const serials = await serialNumbersApi.getAvailableByProduct(item.product_id, productName)
               serialNumbersMap[item.product_id] = serials
             } catch (err) {
               console.error(`Failed to load serial numbers for product ${item.product_id}:`, err)
@@ -147,6 +151,18 @@ export default function EnhancedRequestApprovalModal({
     }))
   }
 
+  const toggleSerialSelection = (productId: string, serialNumber: string, maxQty: number) => {
+    setSelectedSerialNumbers((prev) => {
+      const current = prev[productId] || []
+      const isSelected = current.includes(serialNumber)
+      if (isSelected) {
+        return { ...prev, [productId]: current.filter((s) => s !== serialNumber) }
+      }
+      if (current.length >= maxQty) return prev
+      return { ...prev, [productId]: [...current, serialNumber] }
+    })
+  }
+
   const handleApprove = async () => {
     setIsSubmitting(true)
     setError(null)
@@ -183,10 +199,19 @@ export default function EnhancedRequestApprovalModal({
             }, {} as Record<string, { from: string; to: string }>)
           : undefined
 
+      // Build serial_numbers map for dispatch (product_id -> selected serials)
+      const serialNumbersData =
+        currentUser?.role === "super-admin" && Object.keys(selectedSerialNumbers).length > 0
+          ? Object.fromEntries(
+              Object.entries(selectedSerialNumbers).filter(([, arr]) => arr.length > 0)
+            )
+          : undefined
+
       // Dispatch the request
       await stockRequestsApi.dispatch(request.id, {
         dispatch_image: dispatchImage || undefined,
         serial_number_ranges: serialNumberRangesData,
+        serial_numbers: serialNumbersData,
       })
       onApprove()
       onClose()
@@ -256,7 +281,7 @@ export default function EnhancedRequestApprovalModal({
                       const product = item.product || products[item.product_id]
                       const productName = product?.name || "Unknown Product"
                       const productModel = product?.model || ""
-                      // Get admin's stock for this product, fallback to 0 if not found
+                      // For Super Admin: show available serials. For Admin: show admin inventory.
                       const adminStock = adminInventory[item.product_id] ?? 0
                       const originalQuantity = item.quantity
                       const editedQuantity = editedQuantities[index] ?? originalQuantity
@@ -264,6 +289,7 @@ export default function EnhancedRequestApprovalModal({
                       
                       const serialRange = serialNumberRanges[index] || { from: "", to: "" }
                       const availableSerials = availableSerialNumbers[item.product_id] || []
+                      const selectedSerials = selectedSerialNumbers[item.product_id] || []
                       const isSuperAdmin = currentUser?.role === "super-admin"
                       
                       return (
@@ -273,7 +299,18 @@ export default function EnhancedRequestApprovalModal({
                             <p className="text-white font-medium">
                               {productName} {productModel && `- ${productModel}`}
                             </p>
-                              <p className="text-slate-400 text-xs mt-1">My Stock: {adminStock} units</p>
+                              {isSuperAdmin ? (
+                                <p className="text-slate-400 text-xs mt-1">
+                                  Available serial numbers: {availableSerials.length}
+                                  {selectedSerials.length > 0 && (
+                                    <span className="text-cyan-400 ml-1">
+                                      ({selectedSerials.length} selected for dispatch)
+                                    </span>
+                                  )}
+                                </p>
+                              ) : (
+                                <p className="text-slate-400 text-xs mt-1">My Stock: {adminStock} units</p>
+                              )}
                               {isModified && (
                                 <p className="text-amber-400 text-xs mt-1">
                                   Original: {originalQuantity} units
@@ -296,45 +333,78 @@ export default function EnhancedRequestApprovalModal({
                             </div>
                           </div>
                           
-                          {/* Serial Number Range Selection - Only for Super Admin */}
-                          {isSuperAdmin && availableSerials.length > 0 && (
+                          {/* Available Serial Numbers - Select which to dispatch (Super Admin). Only available (status=available) serials shown. */}
+                          {isSuperAdmin && (
                             <div className="pt-2 border-t border-slate-700 space-y-2">
-                              <p className="text-xs text-slate-400 font-medium">Serial Number Range (Optional)</p>
-                              <div className="grid grid-cols-2 gap-2">
-                                <div>
-                                  <label className="block text-xs text-slate-400 mb-1">From</label>
-                                  <input
-                                    type="text"
-                                    value={serialRange.from}
-                                    onChange={(e) => {
-                                      setSerialNumberRanges(prev => ({
-                                        ...prev,
-                                        [index]: { ...(prev[index] || { from: "", to: "" }), from: e.target.value }
-                                      }))
-                                    }}
-                                    placeholder="e.g., SN001"
-                                    className="w-full px-2 py-1.5 bg-slate-700 border border-slate-600 rounded text-white text-sm focus:outline-none focus:border-cyan-500"
-                                  />
-                                </div>
-                                <div>
-                                  <label className="block text-xs text-slate-400 mb-1">To</label>
-                                  <input
-                                    type="text"
-                                    value={serialRange.to}
-                                    onChange={(e) => {
-                                      setSerialNumberRanges(prev => ({
-                                        ...prev,
-                                        [index]: { ...(prev[index] || { from: "", to: "" }), to: e.target.value }
-                                      }))
-                                    }}
-                                    placeholder="e.g., SN008"
-                                    className="w-full px-2 py-1.5 bg-slate-700 border border-slate-600 rounded text-white text-sm focus:outline-none focus:border-cyan-500"
-                                  />
-                                </div>
-                              </div>
-                              <p className="text-xs text-slate-500">
-                                Available: {availableSerials.length} serial numbers. Leave empty to transfer without specific serial numbers.
+                              <p className="text-xs text-slate-400 font-medium">
+                                Select serial numbers to dispatch (choose up to {editedQuantity}). Only available serials shown.
                               </p>
+                              {availableSerials.length > 0 ? (
+                                <div className="max-h-32 overflow-y-auto grid grid-cols-2 sm:grid-cols-3 gap-2 p-2 bg-slate-800/50 rounded">
+                                  {availableSerials.map((sn) => {
+                                    const snStr = typeof sn === "string" ? sn : sn.serial_number
+                                    const isChecked = selectedSerials.includes(snStr)
+                                    const atLimit = selectedSerials.length >= editedQuantity && !isChecked
+                                    return (
+                                      <label
+                                        key={sn.id || snStr}
+                                        className={`flex items-center gap-2 p-2 rounded cursor-pointer text-sm ${
+                                          atLimit ? "opacity-50 cursor-not-allowed" : "hover:bg-slate-700/50"
+                                        }`}
+                                      >
+                                        <input
+                                          type="checkbox"
+                                          checked={isChecked}
+                                          disabled={atLimit}
+                                          onChange={() => toggleSerialSelection(item.product_id, snStr, editedQuantity)}
+                                          className="rounded border-slate-600 bg-slate-700 text-cyan-500"
+                                        />
+                                        <span className="text-white font-mono truncate">{snStr}</span>
+                                      </label>
+                                    )
+                                  })}
+                                </div>
+                              ) : (
+                                <p className="text-xs text-amber-400/90 py-2">
+                                  No available serial numbers for this product. Add serial numbers with status &quot;available&quot; to dispatch.
+                                </p>
+                              )}
+                              {/* Fallback: Serial Number Range (Optional) */}
+                              <details className="mt-2">
+                                <summary className="text-xs text-slate-500 cursor-pointer">Or use range (optional)</summary>
+                                <div className="grid grid-cols-2 gap-2 mt-2">
+                                  <div>
+                                    <label className="block text-xs text-slate-400 mb-1">From</label>
+                                    <input
+                                      type="text"
+                                      value={serialRange.from}
+                                      onChange={(e) => {
+                                        setSerialNumberRanges(prev => ({
+                                          ...prev,
+                                          [index]: { ...(prev[index] || { from: "", to: "" }), from: e.target.value }
+                                        }))
+                                      }}
+                                      placeholder="e.g., SN001"
+                                      className="w-full px-2 py-1.5 bg-slate-700 border border-slate-600 rounded text-white text-sm focus:outline-none focus:border-cyan-500"
+                                    />
+                                  </div>
+                                  <div>
+                                    <label className="block text-xs text-slate-400 mb-1">To</label>
+                                    <input
+                                      type="text"
+                                      value={serialRange.to}
+                                      onChange={(e) => {
+                                        setSerialNumberRanges(prev => ({
+                                          ...prev,
+                                          [index]: { ...(prev[index] || { from: "", to: "" }), to: e.target.value }
+                                        }))
+                                      }}
+                                      placeholder="e.g., SN008"
+                                      className="w-full px-2 py-1.5 bg-slate-700 border border-slate-600 rounded text-white text-sm focus:outline-none focus:border-cyan-500"
+                                    />
+                                  </div>
+                                </div>
+                              </details>
                             </div>
                           )}
                         </div>

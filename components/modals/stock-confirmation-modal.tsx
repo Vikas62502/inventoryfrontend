@@ -126,14 +126,33 @@ export default function StockConfirmationModal({ request, onConfirm, onClose }: 
                     const product = item.product || products[item.product_id]
                     const productName = product?.name || "Unknown Product"
                     const productModel = product?.model || ""
+                    const serials =
+                      item.serial_numbers ??
+                      fullRequest.dispatched_serial_numbers?.[item.product_id] ??
+                      []
                     return (
-                      <div key={index} className="flex justify-between items-center p-2 bg-slate-600/50 rounded">
-                        <div>
+                      <div key={index} className="p-2 bg-slate-600/50 rounded space-y-1">
+                        <div className="flex justify-between items-center">
                           <p className="text-white font-medium">
                             {productName} {productModel && `- ${productModel}`}
                           </p>
+                          <p className="text-cyan-400 font-bold">{item.quantity} units</p>
                         </div>
-                        <p className="text-cyan-400 font-bold">{item.quantity} units</p>
+                        {serials.length > 0 && (
+                          <div className="mt-2 pt-2 border-t border-slate-500/50">
+                            <p className="text-slate-400 text-xs mb-1">Serial numbers</p>
+                            <div className="flex flex-wrap gap-1.5">
+                              {serials.map((sn, i) => (
+                                <span
+                                  key={i}
+                                  className="px-2 py-0.5 bg-slate-700 rounded text-sm text-cyan-300 font-mono"
+                                >
+                                  {sn}
+                                </span>
+                              ))}
+                            </div>
+                          </div>
+                        )}
                       </div>
                     )
                   })

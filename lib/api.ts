@@ -273,8 +273,52 @@ export interface SerialNumberSearchResult {
 }
 
 export const serialNumbersApi = {
-  async getByProduct(productId: string): Promise<SerialNumber[]> {
-    return apiClient.get<SerialNumber[]>(`/products/${productId}/serial-numbers`)
+  async getByProduct(productId: string, params?: { status?: string }): Promise<SerialNumber[]> {
+    return apiClient.get<SerialNumber[]>(`/products/${productId}/serial-numbers`, params)
+  },
+
+  /** Get serial numbers available for dispatch. Tries multiple endpoints - backend may use product_id or product_name. */
+  async getAvailableByProduct(productId: string, productName?: string): Promise<SerialNumber[]> {
+    const toSerial = (s: string | { serial_number: string; id?: string }, i: number): SerialNumber =>
+      typeof s === "string"
+        ? { id: `f-${i}-${s}`, product_id: productId, serial_number: s }
+        : { id: (s as any).id || `f-${i}-${(s as any).serial_number}`, product_id: productId, serial_number: (s as any).serial_number, status: (s as any).status }
+
+    let all: SerialNumber[] = []
+    const endpoints: (() => Promise<SerialNumber[]>)[] = [
+      async () => apiClient.get<SerialNumber[]>(`/products/${productId}/serial-numbers`),
+      async () => {
+        const p = await apiClient.get<any>(`/products/${productId}`)
+        const sns = p?.serial_numbers || p?.SerialNumbers
+        return Array.isArray(sns) ? sns.map((s, i) => toSerial(s, i)) : []
+      },
+      async () => apiClient.get<SerialNumber[]>("/serial-numbers", { product_id: productId, status: "available" }),
+      async () => apiClient.get<SerialNumber[]>("/serial-numbers", { product_id: productId }),
+      async () => apiClient.get<SerialNumber[]>("/product-serial-numbers", { product_id: productId }),
+    ]
+    if (productName) {
+      endpoints.push(
+        async () => apiClient.get<SerialNumber[]>("/serial-numbers", { product_name: productName }),
+        async () => apiClient.get<SerialNumber[]>("/product-serial-numbers", { product_name: productName })
+      )
+    }
+    for (const fn of endpoints) {
+      try {
+        const result = await fn()
+        if (Array.isArray(result) && result.length > 0) {
+          all = result
+          break
+        }
+      } catch {
+        continue
+      }
+    }
+    // Exclude only dispatched, sold, acknowledged. Default/new serials (no status or "available") are shown.
+    const excluded = ["dispatched", "sold", "acknowledged"]
+    return all.filter((s) => {
+      const status = (s.status || "").toLowerCase()
+      return !status || status === "available" || !excluded.includes(status)
+    })
   },
 
   async search(query: string): Promise<SerialNumberSearchResult | null> {
@@ -283,6 +327,27 @@ export const serialNumbersApi = {
 
   async delete(serialNumberId: string): Promise<void> {
     return apiClient.delete<void>(`/serial-numbers/${serialNumberId}`)
+  },
+
+  /** Get serial numbers for admin's stock (agent views admin's serials). Tries admin-scoped endpoint first. */
+  async getByAdminProduct(adminId: string, productId: string, productName?: string): Promise<SerialNumber[]> {
+    try {
+      const result = await apiClient.get<SerialNumber[]>(`/admin-inventory/admin/${adminId}/products/${productId}/serial-numbers`)
+      if (Array.isArray(result) && result.length > 0) return result
+    } catch {
+      /* fallback */
+    }
+    try {
+      const result = await apiClient.get<SerialNumber[]>("/serial-numbers", {
+        owner_id: adminId,
+        owner_type: "admin",
+        product_id: productId,
+      })
+      if (Array.isArray(result)) return result
+    } catch {
+      /* fallback */
+    }
+    return this.getAvailableByProduct(productId, productName)
   },
 }
 
@@ -309,6 +374,7 @@ export const categoriesApi = {
 export interface StockRequestItem {
   product_id: string
   quantity: number
+  serial_numbers?: string[]
 }
 
 export interface StockRequest {
@@ -321,7 +387,10 @@ export interface StockRequest {
     product_id: string
     product?: Product
     quantity: number
+    serial_numbers?: string[]
   }>
+  /** Serial numbers dispatched per product (product_id -> string[]). Returned by backend when request was dispatched with serials. */
+  dispatched_serial_numbers?: Record<string, string[]>
   status: "pending" | "dispatched" | "confirmed" | "rejected"
   notes?: string
   rejection_reason?: string
@@ -393,6 +462,8 @@ export const stockRequestsApi = {
       rejection_reason?: string
       dispatch_image?: File
       serial_number_ranges?: Record<string, { from: string; to: string }>
+      /** Map product_id -> serial numbers selected for dispatch. Backend updates status to "dispatched". */
+      serial_numbers?: Record<string, string[]>
     }
   ): Promise<StockRequest> {
     if (data?.dispatch_image) {
@@ -404,6 +475,9 @@ export const stockRequestsApi = {
       if (data.serial_number_ranges) {
         formData.append("serial_number_ranges", JSON.stringify(data.serial_number_ranges))
       }
+      if (data.serial_numbers) {
+        formData.append("serial_numbers", JSON.stringify(data.serial_numbers))
+      }
       return apiClient.post<StockRequest>(`/stock-requests/${id}/dispatch`, formData, true)
     }
     const body: any = {}
@@ -412,6 +486,9 @@ export const stockRequestsApi = {
     }
     if (data?.serial_number_ranges) {
       body.serial_number_ranges = data.serial_number_ranges
+    }
+    if (data?.serial_numbers) {
+      body.serial_numbers = data.serial_numbers
     }
     return apiClient.post<StockRequest>(`/stock-requests/${id}/dispatch`, body)
   },

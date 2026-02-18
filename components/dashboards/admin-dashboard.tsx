@@ -3,12 +3,13 @@
 import { useState, useEffect } from "react"
 import { Card } from "@/components/ui/card"
 import { Button } from "@/components/ui/button"
-import { Plus, CheckCircle, Clock, XCircle, ShoppingCart, AlertCircle, TrendingUp, Loader2, RotateCcw, UserPlus, Search, Package } from "lucide-react"
+import { Plus, CheckCircle, Clock, XCircle, ShoppingCart, AlertCircle, TrendingUp, Loader2, RotateCcw, UserPlus, Search, Package, Eye } from "lucide-react"
 import { Tabs, TabsList, TabsTrigger, TabsContent } from "@/components/ui/tabs"
 import AdminStockRequestModal from "@/components/modals/admin-stock-request-modal"
 import StockConfirmationModal from "@/components/modals/stock-confirmation-modal"
 import StockReturnModal from "@/components/modals/stock-return-modal"
 import CreateUserModal from "@/components/modals/create-user-modal"
+import SerialNumbersViewModal from "@/components/modals/serial-numbers-view-modal"
 import { useStockRequestsState } from "@/hooks/use-stock-requests-state"
 import { usersApi, stockReturnsApi, productsApi, adminInventoryApi } from "@/lib/api"
 import type { AdminInventory } from "@/lib/api"
@@ -48,6 +49,8 @@ export default function AdminDashboard({ userName }: AdminDashboardProps) {
   const [adminInventory, setAdminInventory] = useState<AdminInventory[]>([])
   const [loadingInventory, setLoadingInventory] = useState(true)
   const [inventorySearchQuery, setInventorySearchQuery] = useState("")
+  const [showSerialNumbersModal, setShowSerialNumbersModal] = useState(false)
+  const [serialNumbersProduct, setSerialNumbersProduct] = useState<{ id: string; name: string } | null>(null)
   
   // Tab state
   const [activeTab, setActiveTab] = useState<string>("overview")
@@ -974,10 +977,22 @@ export default function AdminDashboard({ userName }: AdminDashboardProps) {
                                     <p className="text-xs text-slate-400">units</p>
                                   </div>
                                 </div>
-                                <div className="pt-2 border-t border-slate-700">
+                                <div className="pt-2 border-t border-slate-700 flex items-center justify-between">
                                   <p className="text-xs text-slate-400">
                                     Last updated: {formatDateISO(item.updated_at)}
                                   </p>
+                                  <Button
+                                    size="sm"
+                                    variant="outline"
+                                    onClick={() => {
+                                      setSerialNumbersProduct({ id: item.product_id, name: productName })
+                                      setShowSerialNumbersModal(true)
+                                    }}
+                                    className="border-cyan-600 text-cyan-400 hover:bg-cyan-950 text-xs"
+                                  >
+                                    <Eye className="w-3 h-3 mr-1" />
+                                    View Serials
+                                  </Button>
                                 </div>
                               </div>
                             </Card>
@@ -1005,6 +1020,9 @@ export default function AdminDashboard({ userName }: AdminDashboardProps) {
                                 </th>
                                 <th className="px-6 py-3 text-left text-sm font-semibold text-slate-300">
                                   Last Updated
+                                </th>
+                                <th className="px-6 py-3 text-left text-sm font-semibold text-slate-300">
+                                  Actions
                                 </th>
                               </tr>
                             </thead>
@@ -1037,6 +1055,20 @@ export default function AdminDashboard({ userName }: AdminDashboardProps) {
                                     </td>
                                     <td className="px-6 py-4 text-slate-400 text-sm">
                                       {formatDateISO(item.updated_at)}
+                                    </td>
+                                    <td className="px-6 py-4">
+                                      <Button
+                                        size="sm"
+                                        variant="outline"
+                                        onClick={() => {
+                                          setSerialNumbersProduct({ id: item.product_id, name: productName })
+                                          setShowSerialNumbersModal(true)
+                                        }}
+                                        className="border-cyan-600 text-cyan-400 hover:bg-cyan-950 text-xs"
+                                      >
+                                        <Eye className="w-3 h-3 mr-1" />
+                                        View Serials
+                                      </Button>
                                     </td>
                                   </tr>
                                 )
@@ -1458,6 +1490,16 @@ export default function AdminDashboard({ userName }: AdminDashboardProps) {
             setShowCreateUserModal(false)
             // Reload agents list after creating a new agent
             await loadMyAgents()
+          }}
+        />
+      )}
+      {showSerialNumbersModal && serialNumbersProduct && (
+        <SerialNumbersViewModal
+          productId={serialNumbersProduct.id}
+          productName={serialNumbersProduct.name}
+          onClose={() => {
+            setShowSerialNumbersModal(false)
+            setSerialNumbersProduct(null)
           }}
         />
       )}

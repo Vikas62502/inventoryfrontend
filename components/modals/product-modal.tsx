@@ -918,32 +918,35 @@ export default function ProductModal({ product, onClose, onSave }: ProductModalP
       
       // Add serial numbers if stock is being added (for editing existing products)
       if (product?.id && stockToAdd > 0) {
-        // Backend only accepts serial_numbers as JSON string array
-        // For image/excel uploads, backend should extract serial numbers server-side
-        // For now, only send if we have manually entered serial numbers
+        // Backend validation: stock_to_add cannot exceed current product quantity for "initial stock" scenario.
+        // When stockToAdd > existingStock, we batch into multiple API calls.
+        if (existingStock === 0) {
+          setError("Cannot add stock to a product with zero quantity. Please set initial quantity first.")
+          setLoading(false)
+          return
+        }
+        if (stockToAdd > existingStock && serialNumbers.length > 0) {
+          // Validate we have enough serials for the batch
+          if (serialNumbers.length !== stockToAdd) {
+            setError(`Please enter ${stockToAdd} serial numbers. Currently have ${serialNumbers.length}.`)
+            setLoading(false)
+            return
+          }
+        }
         if (serialNumbers.length > 0) {
-          // Include serial numbers array (will be sent as JSON string in FormData)
           productData.serial_numbers = serialNumbers
-          
-          // Include product metadata for serial number association
           productData.product_name = formData.name
           productData.product_category = categoryName
-          
-          // Add pricing data (cost price for each serial number)
           if (individualPricing) {
-            // Individual prices for each serial number
             productData.serial_number_prices = serialNumberPrices
           } else {
-            // Single price for all serial numbers (cost price)
             productData.default_price = defaultPrice
           }
-      } else if (serialNumberExcelFile) {
-        // TODO: Backend should support excel extraction
-        // For now, show error that manual entry is required
-        setError("Please enter serial numbers manually. Excel extraction will be supported in future updates.")
-        setLoading(false)
-        return
-      }
+        } else if (serialNumberExcelFile) {
+          setError("Please enter serial numbers manually. Excel extraction will be supported in future updates.")
+          setLoading(false)
+          return
+        }
         productData.stock_to_add = stockToAdd
       }
       
@@ -984,11 +987,42 @@ export default function ProductModal({ product, onClose, onSave }: ProductModalP
 
       if (product?.id) {
         // Update existing product
-        // If updating with FormData (has image or serial numbers), use FormData
+        // Backend: stock_to_add cannot exceed current product quantity. When stockToAdd > existingStock,
+        // batch into multiple API calls (add existingStock at a time, refetch, repeat).
         const updateData: any = { ...productData }
-        if (productData.serial_numbers || imageFile) {
-          // Update using FormData for file uploads or serial numbers
-          const updated = await productsApi.update(product.id, updateData)
+        const needsFormData = productData.serial_numbers || imageFile || productData.stock_to_add !== undefined
+        if (needsFormData) {
+          let lastUpdated: Product = product
+          const serials = (productData.serial_numbers as string[]) || []
+          const stockToAddVal = productData.stock_to_add ?? 0
+
+          if (stockToAddVal > 0) {
+            let currentStock = existingStock
+            let remainingToAdd = stockToAddVal
+            let serialOffset = 0
+
+            while (remainingToAdd > 0) {
+              const chunk = Math.min(remainingToAdd, currentStock)
+              if (chunk <= 0 && remainingToAdd > 0) {
+                setError("Cannot add stock: backend requires stock_to_add <= current quantity. Please add in smaller batches.")
+                setLoading(false)
+                return
+              }
+              const batchData: any = {
+                ...productData,
+                stock_to_add: chunk,
+                serial_numbers: serials.length > 0 ? serials.slice(serialOffset, serialOffset + chunk) : undefined,
+              }
+              if (!batchData.serial_numbers?.length) delete batchData.serial_numbers
+              lastUpdated = await productsApi.update(product.id, batchData)
+              remainingToAdd -= chunk
+              serialOffset += chunk
+              currentStock = (lastUpdated as any).quantity ?? lastUpdated.central_stock ?? lastUpdated.total_stock ?? currentStock + chunk
+            }
+          } else {
+            lastUpdated = await productsApi.update(product.id, updateData)
+          }
+          const updated = lastUpdated
           // Use returned serial_numbers to refresh modal list immediately; fallback to what we sent
           const returnedSerials = (updated as any).serial_numbers
           if (returnedSerials?.length) {
@@ -2526,7 +2560,11 @@ Example: SN001, SN002, SN003"
                   </div>
                   <div>
                     <span className="text-xs text-slate-400">Current Stock:</span>
-                    <p className="text-sm font-medium text-white">{existingStock}</p>
+                    <p className="text-sm font-medium text-white">
+                      {assignedSerialNumbers.length > 0
+                        ? Math.max(existingStock, assignedSerialNumbers.length)
+                        : existingStock}
+                    </p>
                   </div>
                 </div>
               </div>
