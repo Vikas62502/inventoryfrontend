@@ -97,8 +97,11 @@ When admin confirms receipt of dispatched stock:
 
 When agent creates a sale with line items that reference serial numbers:
 
-- Update those serial numbers from `acknowledged` (or `available` if sold from admin's direct stock) → `sold`
+- **Agent selects serials from the dispatch** – those in `dispatched` or `acknowledged` status (mapped to agent's admin)
+- Update those serial numbers to `status = 'sold'`
 - Link serial number to sale (e.g. `sale_id`, `sale_item_id`)
+
+**Status change:** `dispatched` or `acknowledged` → **`sold`**
 
 ---
 

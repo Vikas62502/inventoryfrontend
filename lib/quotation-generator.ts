@@ -347,6 +347,10 @@ export function generateQuotationPDF(sale: SaleWithAddresses, products: Record<s
     sale.items.forEach((item, index) => {
       const product = products[item.product_id] || item.product
       const productName = product?.name || 'Unknown Product'
+      const serials = (item as any).serial_numbers || (item as any).serialNumbers
+      const description = serials && serials.length > 0
+        ? `${productName}\n(Serial: ${serials.join(', ')})`
+        : productName
       // Default HSN code for solar products, can be updated per product later
       const hsnCode = (product as any)?.hsn_code || '73066100'
       const quantity = item.quantity || 0
@@ -357,7 +361,7 @@ export function generateQuotationPDF(sale: SaleWithAddresses, products: Record<s
 
       tableData.push([
         (index + 1).toString(),
-        productName,
+        description,
         hsnCode,
         saleDate,
         quantity.toFixed(1) + ' PCS',

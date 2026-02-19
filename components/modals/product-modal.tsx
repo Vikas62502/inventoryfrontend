@@ -820,6 +820,11 @@ export default function ProductModal({ product, onClose, onSave }: ProductModalP
           }
         }
       }
+
+      // Super Admin: include selling price when creating
+      if (isSuperAdmin && sellingPriceOverride > 0) {
+        productData.selling_price = sellingPriceOverride
+      }
       
       // Create product with serial numbers and pricing
       const created = await productsApi.create(productData)
@@ -968,10 +973,12 @@ export default function ProductModal({ product, onClose, onSave }: ProductModalP
       // unit_price = cost price (same concept). selling_price = separate field set by Super Admin.
       if (isSuperAdmin && product?.id) {
         // Super Admin: set selling_price only (do NOT overwrite unit_price/cost price)
-        productData.use_max_cost_price = useMaxCostForSelling
+        // Manual override takes precedence: when user enters a price, use it (not max cost)
         if (sellingPriceOverride > 0) {
-          // Manual override – always send when user has entered a value
+          productData.use_max_cost_price = false
           productData.selling_price = sellingPriceOverride
+        } else {
+          productData.use_max_cost_price = useMaxCostForSelling
         }
         // When use_max_cost_price true and no manual override, backend uses max cost from serials
         // Do NOT send unit_price - it is cost price and stays unchanged
@@ -1117,6 +1124,29 @@ export default function ProductModal({ product, onClose, onSave }: ProductModalP
                 )}
               </p>
             </div>
+
+            {/* Super Admin: Selling Price – when creating new product */}
+            {isSuperAdmin && (
+              <div className="p-4 bg-emerald-900/20 border border-emerald-600/50 rounded-lg space-y-3">
+                <div className="flex items-center gap-2">
+                  <DollarSign className="w-5 h-5 text-emerald-500" />
+                  <label className="text-sm font-medium text-slate-300">Selling Price (₹)</label>
+                </div>
+                <p className="text-xs text-slate-400">
+                  Set the selling price for quotations and sales. Optional – can be set later from Set Selling Price tab.
+                </p>
+                <input
+                  type="text"
+                  value={sellingPriceOverride || ""}
+                  onChange={(e) => {
+                    const value = e.target.value.replace(/[^\d.]/g, "")
+                    setSellingPriceOverride(value ? parseFloat(value) || 0 : 0)
+                  }}
+                  placeholder="Enter selling price (optional)"
+                  className="w-full px-4 py-2 bg-slate-700 border border-slate-600 rounded-lg text-white placeholder-slate-500 focus:outline-none focus:border-emerald-500"
+                />
+              </div>
+            )}
             
             {/* Serial Numbers Section */}
             <div className="p-4 bg-slate-800/50 border border-slate-600 rounded-lg">

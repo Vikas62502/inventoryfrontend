@@ -953,6 +953,7 @@ export default function AgentDashboard({ userName }: AgentDashboardProps) {
           }}
           onSave={handleCreateSale}
           availableStock={availableStockForSales}
+          adminId={adminId ?? undefined}
         />
       )}
 

@@ -46,6 +46,7 @@
 |-------|------|------|
 | `name`, `model`, `category`, `quantity`, `unit_price` | Required | Always |
 | `serial_numbers` | JSON string array | When quantity > 0 and user enters serials |
+| `selling_price` | number | When Super Admin sets selling price on create |
 | `default_price` | number | When checkbox unchecked (single cost for all) |
 | `serial_number_prices` | JSON object | When checkbox checked (per-serial cost) |
 | `product_name`, `product_category` | string | Optional, fallback to product name/category |
@@ -121,7 +122,7 @@
 - `dispatched_serial_numbers: { "product_id": ["SN1","SN2",...] }` at the request level, or
 - `serial_numbers: ["SN1","SN2",...]` on each item in `items[]`
 
-**Sale creation:** When agent creates B2B/B2C sale with serial-tracked items, update serials → `sold`.
+**Sale creation:** Agent selects serials from the **dispatch** (status `dispatched` or `acknowledged`). When agent creates sale, backend updates those serials → `sold`.
 
 ---
 
@@ -278,12 +279,40 @@ For the Account role viewing "All Agent Sales", the frontend expects:
 | 5 | Admin confirm: update linked serials `dispatched` → `acknowledged` | `POST /api/stock-requests/:id/confirm` | Medium |
 | 6 | Sale creation: update serials → `sold` when linked to sale | `POST /api/sales` | Medium |
 
+### POST /api/sales – Serial Numbers in Items
+
+**Agent creates sale:** When agent selects serial numbers (from admin's mapped serials) in the Create Sale modal, the frontend sends:
+
+```json
+{
+  "items": [
+    {
+      "product_id": "prod-123",
+      "quantity": 2,
+      "unit_price": 5000,
+      "gst_rate": 18,
+      "serial_numbers": ["U6077580", "U6077578"]
+    }
+  ]
+}
+```
+
+**Backend must:**
+1. Accept `serial_numbers` (string array) on each item
+2. Validate each serial exists and is mapped to the agent's admin
+3. **Accept status `dispatched` or `acknowledged`** – do not reject with "Serial number is not available for sale"
+4. **On submit: update each serial to `status = 'sold'`** (`dispatched` | `acknowledged` → `sold`)
+5. Link serials to the sale (e.g. `sale_id`, `sale_item_id`)
+
+**GET /api/sales/:id** – Return `serial_numbers` on each item when present, so Account and Agent can view them in Edit modal and quotation PDF.
+
 ---
 
 ## 📚 All Documents
 
 | Document | Purpose |
 |----------|---------|
+| **BACKEND_CHANGES_AS_PER_FRONTEND.md** | **Consolidated backend changes** – All changes required to support current frontend (stock receipt serials, admin/agent serial view, sale serial selection) |
 | **BACKEND_SERIAL_NUMBER_STATUS_LIFECYCLE.md** | **Serial number status** – available → mapped → dispatched → acknowledged → sold; dispatch with selected serials |
 | **BACKEND_SERIAL_NUMBERS_DISPATCH_FIX.md** | **Fix:** Serial numbers not showing in dispatch modal – GET /products/:id/serial-numbers must return data (by product_id or product_name) |
 | **BACKEND_ACCOUNT_DASHBOARD_CHANGES.md** | **Account dashboard** – sales list (agent name, date), approval status, agent approval, account user creation |

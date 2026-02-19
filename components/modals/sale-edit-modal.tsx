@@ -14,7 +14,7 @@ interface SaleEditModalProps {
   availableStock?: Record<string, number> // For agent: restrict quantity to available stock
 }
 
-type EditItem = { product_id: string; quantity: number; unit_price: number; gst_rate: number }
+type EditItem = { product_id: string; quantity: number; unit_price: number; gst_rate: number; serial_numbers?: string[] }
 
 export default function SaleEditModal({
   saleId,
@@ -102,6 +102,7 @@ export default function SaleEditModal({
               quantity: it.quantity || 0,
               unit_price: it.unit_price ?? it.unitPrice ?? 0,
               gst_rate: it.gst_rate ?? it.gstRate ?? 0,
+              serial_numbers: it.serial_numbers || it.serialNumbers,
             }))
           )
         } else {
@@ -148,12 +149,18 @@ export default function SaleEditModal({
 
     const normalizedItems = items
       .filter((i) => i.product_id)
-      .map((item) => ({
-        product_id: item.product_id,
-        quantity: Number(item.quantity) || 0,
-        unit_price: Number(item.unit_price) || 0,
-        gst_rate: Number(item.gst_rate) ?? 0,
-      }))
+      .map((item) => {
+        const payload: any = {
+          product_id: item.product_id,
+          quantity: Number(item.quantity) || 0,
+          unit_price: Number(item.unit_price) || 0,
+          gst_rate: Number(item.gst_rate) ?? 0,
+        }
+        if (item.serial_numbers && item.serial_numbers.length > 0) {
+          payload.serial_numbers = item.serial_numbers
+        }
+        return payload
+      })
 
     if (normalizedItems.length === 0) {
       setError("Please add at least one product with valid details")
@@ -401,6 +408,18 @@ export default function SaleEditModal({
                       <X className="w-4 h-4" />
                     </Button>
                   </div>
+                  {item.serial_numbers && item.serial_numbers.length > 0 && (
+                    <div className="mt-2 pt-2 border-t border-slate-600/50">
+                      <p className="text-xs text-slate-400 mb-1">Serial numbers (sold)</p>
+                      <div className="flex flex-wrap gap-1.5">
+                        {item.serial_numbers.map((sn, i) => (
+                          <span key={i} className="px-2 py-0.5 bg-slate-700 rounded text-sm text-cyan-300 font-mono">
+                            {sn}
+                          </span>
+                        ))}
+                      </div>
+                    </div>
+                  )}
                 </div>
               ))}
             </div>

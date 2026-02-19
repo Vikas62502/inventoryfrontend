@@ -1497,6 +1497,7 @@ export default function AdminDashboard({ userName }: AdminDashboardProps) {
         <SerialNumbersViewModal
           productId={serialNumbersProduct.id}
           productName={serialNumbersProduct.name}
+          adminId={currentUserId ?? undefined}
           onClose={() => {
             setShowSerialNumbersModal(false)
             setSerialNumbersProduct(null)

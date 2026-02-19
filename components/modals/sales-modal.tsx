@@ -4,7 +4,7 @@ import { useState, useEffect } from "react"
 import { Card } from "@/components/ui/card"
 import { Button } from "@/components/ui/button"
 import { X, Loader2, AlertCircle } from "lucide-react"
-import { productsApi, salesApi, quotationsApi, type Product, SaleItem, type Quotation } from "@/lib/api"
+import { productsApi, salesApi, quotationsApi, serialNumbersApi, type Product, type SerialNumber, type Quotation } from "@/lib/api"
 import AddressFields, { type Address } from "@/components/forms/address-fields"
 
 interface SalesModalProps {
@@ -12,9 +12,11 @@ interface SalesModalProps {
   onClose: () => void
   onSave: (sale: any) => void
   availableStock?: Record<string, number>
+  /** Agent's admin ID – when provided, enables serial number selection from admin's mapped serials */
+  adminId?: string
 }
 
-export default function SalesModal({ saleType, onClose, onSave, availableStock }: SalesModalProps) {
+export default function SalesModal({ saleType, onClose, onSave, availableStock, adminId }: SalesModalProps) {
   const [products, setProducts] = useState<Product[]>([])
   const [quotations, setQuotations] = useState<Quotation[]>([])
   const [loading, setLoading] = useState(true)
@@ -25,7 +27,14 @@ export default function SalesModal({ saleType, onClose, onSave, availableStock }
   const [imagePreview, setImagePreview] = useState<string | null>(null)
   const [selectedQuotationId, setSelectedQuotationId] = useState<string>("")
 
-  const [items, setItems] = useState<Array<{ product_id: string; quantity: number; unit_price: number; gst_rate: number }>>([])
+  const [items, setItems] = useState<Array<{ product_id: string; quantity: number; unit_price: number; gst_rate: number }>>([
+    { product_id: "", quantity: 0, unit_price: 0, gst_rate: 0 },
+  ])
+  /** Selected serial numbers per item index (agent only, when adminId provided) */
+  const [selectedSerialsPerItem, setSelectedSerialsPerItem] = useState<Record<number, string[]>>({})
+  /** Available serials per product (admin's mapped serials, fetched when product selected) */
+  const [availableSerialsPerProduct, setAvailableSerialsPerProduct] = useState<Record<string, SerialNumber[]>>({})
+  const [loadingSerialsForProduct, setLoadingSerialsForProduct] = useState<string | null>(null)
 
   // Address structure matching the Address model
   const emptyAddress: Address = {
@@ -79,6 +88,8 @@ export default function SalesModal({ saleType, onClose, onSave, availableStock }
     }
     loadProducts()
   }, [])
+
+
 
   // Load quotations for B2C sales
   useEffect(() => {
@@ -171,11 +182,28 @@ export default function SalesModal({ saleType, onClose, onSave, availableStock }
 
   const removeItem = (index: number) => {
     setItems(items.filter((_, i) => i !== index))
+    setSelectedSerialsPerItem(prev => {
+      const next: Record<number, string[]> = {}
+      Object.entries(prev).forEach(([k, v]) => {
+        const i = parseInt(k, 10)
+        if (i < index) next[i] = v
+        else if (i > index) next[i - 1] = v
+      })
+      return next
+    })
   }
 
   const updateItem = (index: number, field: string, value: string | number) => {
     const updated = [...items]
     updated[index] = { ...updated[index], [field]: value }
+    
+    // When quantity decreases, trim selected serials to match
+    if (field === "quantity" && typeof value === "number") {
+      const current = selectedSerialsPerItem[index] || []
+      if (current.length > value) {
+        setSelectedSerialsPerItem(prev => ({ ...prev, [index]: current.slice(0, value) }))
+      }
+    }
     
     // Auto-fill unit price from product (use selling_price for sales, else cost/unit_price)
     if (field === "product_id" && value) {
@@ -183,9 +211,49 @@ export default function SalesModal({ saleType, onClose, onSave, availableStock }
       if (product) {
         updated[index].unit_price = product.selling_price ?? product.unit_price ?? product.price ?? 0
       }
+      // Clear selected serials when product changes
+      setSelectedSerialsPerItem(prev => {
+        const next = { ...prev }
+        delete next[index]
+        return next
+      })
+      // Fetch admin's serials for this product (agent with adminId)
+      if (adminId && value) {
+        const p = products.find(pr => pr.id === value)
+        fetchSerialsForProduct(String(value), p?.name)
+      }
     }
     
     setItems(updated)
+  }
+
+  // Fetch admin's serial numbers when product is selected (agent with adminId)
+  const fetchSerialsForProduct = async (productId: string, productName?: string) => {
+    if (!adminId || !productId) return
+    setLoadingSerialsForProduct(productId)
+    try {
+      const serials = await serialNumbersApi.getByAdminProduct(adminId, productId, productName)
+      setAvailableSerialsPerProduct(prev => ({ ...prev, [productId]: serials }))
+    } catch {
+      setAvailableSerialsPerProduct(prev => ({ ...prev, [productId]: [] }))
+    } finally {
+      setLoadingSerialsForProduct(null)
+    }
+  }
+
+  const toggleSerialForItem = (itemIndex: number, serialNumber: string) => {
+    const item = items[itemIndex]
+    if (!item || !item.product_id || item.quantity <= 0) return
+    const current = selectedSerialsPerItem[itemIndex] || []
+    const isSelected = current.includes(serialNumber)
+    let next: string[]
+    if (isSelected) {
+      next = current.filter(s => s !== serialNumber)
+    } else {
+      if (current.length >= item.quantity) return // Already at max
+      next = [...current, serialNumber]
+    }
+    setSelectedSerialsPerItem(prev => ({ ...prev, [itemIndex]: next }))
   }
 
   const calculateTotals = () => {
@@ -225,20 +293,25 @@ export default function SalesModal({ saleType, onClose, onSave, availableStock }
       return
     }
 
-    const normalizedItems = items.map(item => {
+    const normalizedItems = items.map((item, idx) => {
       const quantity = Number(item.quantity)
       const unit_price = Number(item.unit_price)
       const gst_rate = Number(item.gst_rate ?? 0)
       const subtotal = Number.isFinite(quantity) && Number.isFinite(unit_price)
         ? quantity * unit_price
         : 0
-      return {
-      product_id: (item.product_id || "").trim(),
-      quantity,
-      unit_price,
-      gst_rate,
-      subtotal,
+      const serial_numbers = adminId ? (selectedSerialsPerItem[idx] || []).filter(Boolean) : undefined
+      const payload: any = {
+        product_id: (item.product_id || "").trim(),
+        quantity,
+        unit_price,
+        gst_rate,
+        subtotal,
       }
+      if (serial_numbers && serial_numbers.length > 0) {
+        payload.serial_numbers = serial_numbers
+      }
+      return payload
     })
 
     if (
@@ -268,6 +341,20 @@ export default function SalesModal({ saleType, onClose, onSave, availableStock }
             ? `${product.name}${product.model && product.model !== product.name ? ` - ${product.model}` : ""}`
             : "Selected product"
           setError(`${productLabel}: Requested quantity (${item.quantity}) exceeds available stock (${availableQty} units).`)
+          return
+        }
+      }
+    }
+
+    // Serial selection is optional – if selected, count must match quantity; if not selected, sale proceeds without serial_numbers
+    if (adminId) {
+      for (let idx = 0; idx < items.length; idx++) {
+        const item = items[idx]
+        const selected = selectedSerialsPerItem[idx] || []
+        if (selected.length > 0 && selected.length !== item.quantity) {
+          const product = products.find(p => p.id === item.product_id)
+          const productLabel = product?.name || "Product"
+          setError(`${productLabel}: Selected ${selected.length} serial(s) but quantity is ${item.quantity}. Select exactly ${item.quantity} or clear selection.`)
           return
         }
       }
@@ -765,6 +852,64 @@ export default function SalesModal({ saleType, onClose, onSave, availableStock }
                       <X className="w-4 h-4" />
                     </Button>
                   </div>
+                  {/* Serial number selection (agent only – select serials to mark as sold; visible to Account) */}
+                  {adminId && item.product_id && (
+                    <div className="mt-2 pt-2 border-t border-slate-600/50">
+                      {item.quantity <= 0 ? (
+                        <p className="text-xs text-slate-400">
+                          Enter quantity above to select serial numbers for this sale.
+                        </p>
+                      ) : loadingSerialsForProduct === item.product_id ? (
+                        <p className="text-xs text-slate-400 flex items-center gap-1">
+                          <Loader2 className="w-3 h-3 animate-spin" />
+                          Loading serial numbers...
+                        </p>
+                      ) : (() => {
+                        const serials = availableSerialsPerProduct[item.product_id] ?? []
+                        const selected = selectedSerialsPerItem[index] || []
+                        const hasFetched = item.product_id in availableSerialsPerProduct
+                        if (serials.length === 0) {
+                          return (
+                            <p className="text-xs text-slate-400">
+                              {hasFetched
+                                ? "No serial numbers found for this product. Contact your admin."
+                                : "Loading..."}
+                            </p>
+                          )
+                        }
+                        return (
+                          <div>
+                            <p className="text-xs text-slate-400 mb-2">
+                              Select serial numbers to mark as sold ({selected.length} / {item.quantity} selected)
+                            </p>
+                            <div className="flex flex-wrap gap-2">
+                              {serials.map((sn) => {
+                                const isChecked = selected.includes(sn.serial_number)
+                                return (
+                                  <label
+                                    key={sn.id || sn.serial_number}
+                                    className={`inline-flex items-center gap-1.5 px-2 py-1 rounded border cursor-pointer text-sm transition ${
+                                      isChecked
+                                        ? "bg-cyan-900/30 border-cyan-500 text-cyan-300"
+                                        : "bg-slate-700/50 border-slate-600 text-slate-300 hover:border-slate-500"
+                                    }`}
+                                  >
+                                    <input
+                                      type="checkbox"
+                                      checked={isChecked}
+                                      onChange={() => toggleSerialForItem(index, sn.serial_number)}
+                                      className="rounded"
+                                    />
+                                    <span className="font-mono">{sn.serial_number}</span>
+                                  </label>
+                                )
+                              })}
+                            </div>
+                          </div>
+                        )
+                      })()}
+                    </div>
+                  )}
                 </div>
               ))}
               

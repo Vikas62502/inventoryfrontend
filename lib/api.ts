@@ -134,6 +134,8 @@ export const productsApi = {
       serial_number_prices?: Record<string, number>
       product_name?: string
       product_category?: string
+      /** Super Admin: selling price (separate from cost/unit_price) */
+      selling_price?: number
     }
   ): Promise<Product> {
     const formData = new FormData()
@@ -166,6 +168,9 @@ export const productsApi = {
     if (product.product_category) {
       formData.append("product_category", product.product_category)
     }
+    if (product.selling_price !== undefined && product.selling_price > 0) {
+      formData.append("selling_price", product.selling_price.toString())
+    }
 
     return apiClient.post<Product>("/products", formData, true)
   },
@@ -184,9 +189,10 @@ export const productsApi = {
       selling_price?: number
     }
   ): Promise<Product> {
-    // Use FormData if we have image, serial_numbers, stock_to_add, or pricing fields
+    // Use FormData if we have image, serial_numbers, stock_to_add, pricing, or selling price fields
     if (updates.image || updates.serial_numbers || updates.stock_to_add !== undefined || 
-        updates.default_price !== undefined || updates.serial_number_prices) {
+        updates.default_price !== undefined || updates.serial_number_prices ||
+        updates.use_max_cost_price !== undefined || updates.selling_price !== undefined) {
       const formData = new FormData()
       
       // Handle image file
@@ -329,11 +335,11 @@ export const serialNumbersApi = {
     return apiClient.delete<void>(`/serial-numbers/${serialNumberId}`)
   },
 
-  /** Get serial numbers for admin's stock (agent views admin's serials). Tries admin-scoped endpoint first. */
+  /** Get serial numbers for admin's stock (admin views own, agent views admin's). Tries admin-scoped endpoint first. */
   async getByAdminProduct(adminId: string, productId: string, productName?: string): Promise<SerialNumber[]> {
     try {
       const result = await apiClient.get<SerialNumber[]>(`/admin-inventory/admin/${adminId}/products/${productId}/serial-numbers`)
-      if (Array.isArray(result) && result.length > 0) return result
+      if (Array.isArray(result)) return result
     } catch {
       /* fallback */
     }
@@ -347,7 +353,8 @@ export const serialNumbersApi = {
     } catch {
       /* fallback */
     }
-    return this.getAvailableByProduct(productId, productName)
+    // Do NOT fall back to getAvailableByProduct - that returns all serials. Admin must see only their mapped serials.
+    return []
   },
 }
 
@@ -523,6 +530,8 @@ export interface SaleItem {
   quantity: number
   unit_price: number
   gst_rate?: number
+  /** Serial numbers sold (agent selects from admin's mapped serials). Backend marks these as sold. */
+  serial_numbers?: string[]
 }
 
 export interface Sale {
@@ -537,6 +546,7 @@ export interface Sale {
     unit_price: number
     gst_rate: number
     subtotal: number
+    serial_numbers?: string[]
   }>
   subtotal: number
   tax_amount: number
