@@ -3,7 +3,7 @@
 import { useState, useEffect } from "react"
 import { Card } from "@/components/ui/card"
 import { Button } from "@/components/ui/button"
-import { X, Loader2, Eye } from "lucide-react"
+import { X, Loader2, Eye, Search } from "lucide-react"
 import { serialNumbersApi, type SerialNumber } from "@/lib/api"
 
 interface SerialNumbersViewModalProps {
@@ -23,6 +23,7 @@ export default function SerialNumbersViewModal({
   const [serials, setSerials] = useState<SerialNumber[]>([])
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
+  const [searchQuery, setSearchQuery] = useState("")
 
   useEffect(() => {
     const load = async () => {
@@ -65,9 +66,21 @@ export default function SerialNumbersViewModal({
         ) : serials.length === 0 ? (
           <p className="text-slate-400 text-sm py-4">No serial numbers found for this product.</p>
         ) : (
-          <div className="overflow-y-auto flex-1 pr-2">
+          <div className="overflow-y-auto flex-1 pr-2 space-y-3">
+            <div className="relative">
+              <Search className="w-4 h-4 absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" />
+              <input
+                type="text"
+                placeholder="Search serial numbers..."
+                value={searchQuery}
+                onChange={(e) => setSearchQuery(e.target.value)}
+                className="w-full pl-9 pr-4 py-2 bg-slate-700 border border-slate-600 rounded-lg text-white placeholder-slate-500 focus:outline-none focus:border-cyan-500 text-sm"
+              />
+            </div>
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
-              {serials.map((sn) => (
+              {serials
+                .filter((sn) => !searchQuery.trim() || sn.serial_number?.toLowerCase().includes(searchQuery.trim().toLowerCase()))
+                .map((sn) => (
                 <div
                   key={sn.id || sn.serial_number}
                   className="p-3 bg-slate-700/50 border border-slate-600 rounded-lg"
@@ -87,6 +100,9 @@ export default function SerialNumbersViewModal({
                 </div>
               ))}
             </div>
+            {searchQuery.trim() && serials.filter((sn) => sn.serial_number?.toLowerCase().includes(searchQuery.trim().toLowerCase())).length === 0 && (
+              <p className="text-slate-400 text-sm py-4 text-center">No serial numbers match &quot;{searchQuery}&quot;</p>
+            )}
           </div>
         )}
 

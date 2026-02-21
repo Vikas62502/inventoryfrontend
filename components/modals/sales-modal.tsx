@@ -3,7 +3,7 @@
 import { useState, useEffect } from "react"
 import { Card } from "@/components/ui/card"
 import { Button } from "@/components/ui/button"
-import { X, Loader2, AlertCircle } from "lucide-react"
+import { X, Loader2, AlertCircle, Search } from "lucide-react"
 import { productsApi, salesApi, quotationsApi, serialNumbersApi, type Product, type SerialNumber, type Quotation } from "@/lib/api"
 import AddressFields, { type Address } from "@/components/forms/address-fields"
 
@@ -35,6 +35,8 @@ export default function SalesModal({ saleType, onClose, onSave, availableStock, 
   /** Available serials per product (admin's mapped serials, fetched when product selected) */
   const [availableSerialsPerProduct, setAvailableSerialsPerProduct] = useState<Record<string, SerialNumber[]>>({})
   const [loadingSerialsForProduct, setLoadingSerialsForProduct] = useState<string | null>(null)
+  /** Search query per item index for serial selection */
+  const [serialSearchPerItem, setSerialSearchPerItem] = useState<Record<number, string>>({})
 
   // Address structure matching the Address model
   const emptyAddress: Address = {
@@ -877,13 +879,27 @@ export default function SalesModal({ saleType, onClose, onSave, availableStock, 
                             </p>
                           )
                         }
+                        const q = (serialSearchPerItem[index] ?? "").trim().toLowerCase()
+                        const filteredSerials = q ? serials.filter((sn) => sn.serial_number?.toLowerCase().includes(q)) : serials
                         return (
                           <div>
                             <p className="text-xs text-slate-400 mb-2">
                               Select serial numbers to mark as sold ({selected.length} / {item.quantity} selected)
                             </p>
+                            {serials.length > 0 && (
+                              <div className="relative mb-2">
+                                <Search className="w-3.5 h-3.5 absolute left-2.5 top-1/2 -translate-y-1/2 text-slate-400" />
+                                <input
+                                  type="text"
+                                  placeholder="Search serial numbers..."
+                                  value={serialSearchPerItem[index] ?? ""}
+                                  onChange={(e) => setSerialSearchPerItem((prev) => ({ ...prev, [index]: e.target.value }))}
+                                  className="w-full pl-8 pr-3 py-1.5 bg-slate-700 border border-slate-600 rounded text-white placeholder-slate-500 focus:outline-none focus:border-cyan-500 text-xs"
+                                />
+                              </div>
+                            )}
                             <div className="flex flex-wrap gap-2">
-                              {serials.map((sn) => {
+                              {filteredSerials.map((sn) => {
                                 const isChecked = selected.includes(sn.serial_number)
                                 return (
                                   <label
@@ -905,6 +921,9 @@ export default function SalesModal({ saleType, onClose, onSave, availableStock, 
                                 )
                               })}
                             </div>
+                            {q && filteredSerials.length === 0 && (
+                              <p className="text-xs text-slate-400 mt-2">No serial numbers match &quot;{serialSearchPerItem[index]}&quot;</p>
+                            )}
                           </div>
                         )
                       })()}

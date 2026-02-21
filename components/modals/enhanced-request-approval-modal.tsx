@@ -3,7 +3,7 @@
 import { useState, useEffect } from "react"
 import { Card } from "@/components/ui/card"
 import { Button } from "@/components/ui/button"
-import { X, CheckCircle, XCircle, Upload, Image as ImageIcon, Loader2, AlertCircle } from "lucide-react"
+import { X, CheckCircle, XCircle, Upload, Image as ImageIcon, Loader2, AlertCircle, Search } from "lucide-react"
 import type { StockRequest, AdminInventory } from "@/lib/api"
 import { stockRequestsApi, productsApi, adminInventoryApi, serialNumbersApi, type Product } from "@/lib/api"
 import { formatImageUrl, formatDateISO } from "@/lib/utils"
@@ -43,6 +43,8 @@ export default function EnhancedRequestApprovalModal({
   const [currentUser, setCurrentUser] = useState<any>(null)
   // Available serial numbers for each product - map of product_id to SerialNumber[]
   const [availableSerialNumbers, setAvailableSerialNumbers] = useState<Record<string, any[]>>({})
+  /** Search query per item index for serial selection */
+  const [serialSearchPerItem, setSerialSearchPerItem] = useState<Record<number, string>>({})
 
   // Fetch full request details and products
   useEffect(() => {
@@ -340,8 +342,25 @@ export default function EnhancedRequestApprovalModal({
                                 Select serial numbers to dispatch (choose up to {editedQuantity}). Only available serials shown.
                               </p>
                               {availableSerials.length > 0 ? (
-                                <div className="max-h-32 overflow-y-auto grid grid-cols-2 sm:grid-cols-3 gap-2 p-2 bg-slate-800/50 rounded">
-                                  {availableSerials.map((sn) => {
+                                <>
+                                  <div className="relative">
+                                    <Search className="w-3.5 h-3.5 absolute left-2.5 top-1/2 -translate-y-1/2 text-slate-400" />
+                                    <input
+                                      type="text"
+                                      placeholder="Search serial numbers..."
+                                      value={serialSearchPerItem[index] ?? ""}
+                                      onChange={(e) => setSerialSearchPerItem((prev) => ({ ...prev, [index]: e.target.value }))}
+                                      className="w-full pl-8 pr-3 py-1.5 mb-2 bg-slate-700 border border-slate-600 rounded text-white placeholder-slate-500 focus:outline-none focus:border-cyan-500 text-xs"
+                                    />
+                                  </div>
+                                  <div className="max-h-32 overflow-y-auto grid grid-cols-2 sm:grid-cols-3 gap-2 p-2 bg-slate-800/50 rounded">
+                                  {availableSerials
+                                    .filter((sn) => {
+                                      const snStr = typeof sn === "string" ? sn : sn.serial_number
+                                      const q = (serialSearchPerItem[index] ?? "").trim().toLowerCase()
+                                      return !q || (snStr ?? "").toLowerCase().includes(q)
+                                    })
+                                    .map((sn) => {
                                     const snStr = typeof sn === "string" ? sn : sn.serial_number
                                     const isChecked = selectedSerials.includes(snStr)
                                     const atLimit = selectedSerials.length >= editedQuantity && !isChecked
@@ -364,6 +383,14 @@ export default function EnhancedRequestApprovalModal({
                                     )
                                   })}
                                 </div>
+                                {(serialSearchPerItem[index] ?? "").trim() && availableSerials.filter((sn) => {
+                                  const snStr = typeof sn === "string" ? sn : sn.serial_number
+                                  const q = (serialSearchPerItem[index] ?? "").trim().toLowerCase()
+                                  return !q || (snStr ?? "").toLowerCase().includes(q)
+                                }).length === 0 && (
+                                  <p className="text-xs text-slate-400 py-2">No serial numbers match &quot;{serialSearchPerItem[index]}&quot;</p>
+                                )}
+                                </>
                               ) : (
                                 <p className="text-xs text-amber-400/90 py-2">
                                   No available serial numbers for this product. Add serial numbers with status &quot;available&quot; to dispatch.

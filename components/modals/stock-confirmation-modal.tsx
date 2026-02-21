@@ -3,7 +3,7 @@
 import { useState, useEffect } from "react"
 import { Card } from "@/components/ui/card"
 import { Button } from "@/components/ui/button"
-import { X, Upload, Image as ImageIcon, Loader2, AlertCircle, CheckCircle } from "lucide-react"
+import { X, Upload, Image as ImageIcon, Loader2, AlertCircle, CheckCircle, Search } from "lucide-react"
 import type { StockRequest } from "@/lib/api"
 import { stockRequestsApi, productsApi, type Product } from "@/lib/api"
 import { formatImageUrl, formatDateISO, formatDateTimeISO } from "@/lib/utils"
@@ -22,6 +22,8 @@ export default function StockConfirmationModal({ request, onConfirm, onClose }: 
   const [fullRequest, setFullRequest] = useState<StockRequest>(request)
   const [products, setProducts] = useState<Record<string, Product>>({})
   const [loading, setLoading] = useState(true)
+  /** Search query per item index for serial numbers display */
+  const [serialSearchPerItem, setSerialSearchPerItem] = useState<Record<number, string>>({})
 
   // Fetch full request details and products
   useEffect(() => {
@@ -141,16 +143,33 @@ export default function StockConfirmationModal({ request, onConfirm, onClose }: 
                         {serials.length > 0 && (
                           <div className="mt-2 pt-2 border-t border-slate-500/50">
                             <p className="text-slate-400 text-xs mb-1">Serial numbers</p>
+                            {serials.length > 0 && (
+                              <div className="relative mb-2">
+                                <Search className="w-3.5 h-3.5 absolute left-2.5 top-1/2 -translate-y-1/2 text-slate-400" />
+                                <input
+                                  type="text"
+                                  placeholder="Search serial numbers..."
+                                  value={serialSearchPerItem[index] ?? ""}
+                                  onChange={(e) => setSerialSearchPerItem((prev) => ({ ...prev, [index]: e.target.value }))}
+                                  className="w-full pl-8 pr-3 py-1.5 bg-slate-700 border border-slate-600 rounded text-white placeholder-slate-500 focus:outline-none focus:border-cyan-500 text-xs"
+                                />
+                              </div>
+                            )}
                             <div className="flex flex-wrap gap-1.5">
-                              {serials.map((sn, i) => (
-                                <span
-                                  key={i}
-                                  className="px-2 py-0.5 bg-slate-700 rounded text-sm text-cyan-300 font-mono"
-                                >
-                                  {sn}
-                                </span>
-                              ))}
+                              {serials
+                                .filter((sn) => !(serialSearchPerItem[index] ?? "").trim() || (typeof sn === "string" ? sn : String(sn)).toLowerCase().includes((serialSearchPerItem[index] ?? "").trim().toLowerCase()))
+                                .map((sn, i) => (
+                                  <span
+                                    key={i}
+                                    className="px-2 py-0.5 bg-slate-700 rounded text-sm text-cyan-300 font-mono"
+                                  >
+                                    {typeof sn === "string" ? sn : String(sn)}
+                                  </span>
+                                ))}
                             </div>
+                            {(serialSearchPerItem[index] ?? "").trim() && serials.filter((sn) => (typeof sn === "string" ? sn : String(sn)).toLowerCase().includes((serialSearchPerItem[index] ?? "").trim().toLowerCase())).length === 0 && (
+                              <p className="text-xs text-slate-400 mt-1">No serial numbers match &quot;{serialSearchPerItem[index]}&quot;</p>
+                            )}
                           </div>
                         )}
                       </div>

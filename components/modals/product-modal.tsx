@@ -4,7 +4,7 @@ import { useState, useEffect, useRef } from "react"
 import { Card } from "@/components/ui/card"
 import { Button } from "@/components/ui/button"
 import { Checkbox } from "@/components/ui/checkbox"
-import { X, Loader2, AlertCircle, Eye, Camera, CameraOff, DollarSign, ChevronDown, ChevronUp } from "lucide-react"
+import { X, Loader2, AlertCircle, Eye, Camera, CameraOff, DollarSign, ChevronDown, ChevronUp, Search } from "lucide-react"
 import { Html5Qrcode } from "html5-qrcode"
 import { productsApi, categoriesApi, serialNumbersApi, type SerialNumber } from "@/lib/api"
 import type { Product } from "@/lib/api"
@@ -117,6 +117,7 @@ export default function ProductModal({ product, onClose, onSave }: ProductModalP
   const [assignedSerialNumbers, setAssignedSerialNumbers] = useState<SerialNumber[]>([])
   const [loadingSerialNumbers, setLoadingSerialNumbers] = useState(false)
   const [showSerialNumbersModal, setShowSerialNumbersModal] = useState(false)
+  const [serialNumbersSearchQuery, setSerialNumbersSearchQuery] = useState("")
 
   useEffect(() => {
     const loadData = async () => {
@@ -2569,12 +2570,24 @@ Example: SN001, SN002, SN003"
                 Assigned Serial Numbers ({assignedSerialNumbers.length})
               </h2>
               <button
-                onClick={() => setShowSerialNumbersModal(false)}
+                onClick={() => { setShowSerialNumbersModal(false); setSerialNumbersSearchQuery("") }}
                 className="text-slate-400 hover:text-white transition"
               >
                 <X className="w-5 h-5" />
               </button>
             </div>
+            {assignedSerialNumbers.length > 0 && (
+              <div className="relative mb-4">
+                <Search className="w-4 h-4 absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" />
+                <input
+                  type="text"
+                  placeholder="Search serial numbers..."
+                  value={serialNumbersSearchQuery}
+                  onChange={(e) => setSerialNumbersSearchQuery(e.target.value)}
+                  className="w-full pl-9 pr-4 py-2 bg-slate-700 border border-slate-600 rounded-lg text-white placeholder-slate-500 focus:outline-none focus:border-cyan-500 text-sm"
+                />
+              </div>
+            )}
             
             {/* Product details - category, name, current stock */}
             {product?.id && (
@@ -2615,7 +2628,9 @@ Example: SN001, SN002, SN003"
             ) : (
               <div className="space-y-2">
                 <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 gap-2">
-                  {assignedSerialNumbers.map((sn) => (
+                  {assignedSerialNumbers
+                    .filter((sn) => !serialNumbersSearchQuery.trim() || sn.serial_number?.toLowerCase().includes(serialNumbersSearchQuery.trim().toLowerCase()))
+                    .map((sn) => (
                     <div
                       key={sn.id}
                       className="p-3 bg-slate-700/50 border border-slate-600 rounded-lg"
@@ -2634,6 +2649,9 @@ Example: SN001, SN002, SN003"
                     </div>
                   ))}
                 </div>
+                {serialNumbersSearchQuery.trim() && assignedSerialNumbers.filter((sn) => sn.serial_number?.toLowerCase().includes(serialNumbersSearchQuery.trim().toLowerCase())).length === 0 && (
+                  <p className="text-slate-400 text-sm py-4 text-center">No serial numbers match &quot;{serialNumbersSearchQuery}&quot;</p>
+                )}
               </div>
             )}
             
