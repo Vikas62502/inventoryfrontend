@@ -161,7 +161,7 @@ export default function StockConfirmationModal({ request, onConfirm, onClose }: 
                                 .map((sn, i) => (
                                   <span
                                     key={i}
-                                    className="px-2 py-0.5 bg-slate-700 rounded text-sm text-cyan-300 font-mono"
+                                    className="px-2 py-0.5 bg-slate-700 rounded text-sm text-cyan-300 font-mono whitespace-nowrap"
                                   >
                                     {typeof sn === "string" ? sn : String(sn)}
                                   </span>

@@ -246,7 +246,7 @@ export default function EnhancedRequestApprovalModal({
 
   return (
     <div className="fixed inset-0 bg-black/50 backdrop-blur-sm flex items-center justify-center p-2 sm:p-4 z-50">
-      <Card className="bg-slate-800 border-slate-700 p-4 sm:p-6 lg:p-8 max-w-[95%] sm:max-w-xl md:max-w-2xl w-full my-4 sm:my-8 max-h-[95vh] overflow-y-auto">
+      <Card className="bg-slate-800 border-slate-700 p-4 sm:p-6 lg:p-8 max-w-[95%] sm:max-w-xl md:max-w-3xl w-full my-4 sm:my-8 max-h-[95vh] overflow-y-auto">
         <div className="flex items-center justify-between mb-4 sm:mb-6 sticky top-0 bg-slate-800 pb-4 z-10">
           <h2 className="text-xl sm:text-2xl font-bold text-white">Review & Dispatch Stock Request</h2>
           <button onClick={onClose} className="text-slate-400 hover:text-white transition flex-shrink-0 ml-2">
@@ -353,7 +353,7 @@ export default function EnhancedRequestApprovalModal({
                                       className="w-full pl-8 pr-3 py-1.5 mb-2 bg-slate-700 border border-slate-600 rounded text-white placeholder-slate-500 focus:outline-none focus:border-cyan-500 text-xs"
                                     />
                                   </div>
-                                  <div className="max-h-32 overflow-y-auto grid grid-cols-2 sm:grid-cols-3 gap-2 p-2 bg-slate-800/50 rounded">
+                                  <div className="max-h-32 overflow-y-auto grid gap-2 p-2 bg-slate-800/50 rounded" style={{ gridTemplateColumns: 'repeat(auto-fill, minmax(220px, 1fr))' }}>
                                   {availableSerials
                                     .filter((sn) => {
                                       const snStr = typeof sn === "string" ? sn : sn.serial_number
@@ -378,7 +378,7 @@ export default function EnhancedRequestApprovalModal({
                                           onChange={() => toggleSerialSelection(item.product_id, snStr, editedQuantity)}
                                           className="rounded border-slate-600 bg-slate-700 text-cyan-500"
                                         />
-                                        <span className="text-white font-mono truncate">{snStr}</span>
+                                        <span className="text-white font-mono whitespace-nowrap">{snStr}</span>
                                       </label>
                                     )
                                   })}

@@ -916,7 +916,7 @@ export default function SalesModal({ saleType, onClose, onSave, availableStock, 
                                       onChange={() => toggleSerialForItem(index, sn.serial_number)}
                                       className="rounded"
                                     />
-                                    <span className="font-mono">{sn.serial_number}</span>
+                                    <span className="font-mono whitespace-nowrap">{sn.serial_number}</span>
                                   </label>
                                 )
                               })}

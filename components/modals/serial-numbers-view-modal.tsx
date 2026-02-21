@@ -46,7 +46,7 @@ export default function SerialNumbersViewModal({
 
   return (
     <div className="fixed inset-0 bg-black/50 backdrop-blur-sm flex items-center justify-center p-4 z-50">
-      <Card className="bg-slate-800 border-slate-700 p-6 max-w-lg w-full max-h-[80vh] overflow-hidden flex flex-col">
+      <Card className="bg-slate-800 border-slate-700 p-6 max-w-2xl w-full max-h-[80vh] overflow-hidden flex flex-col">
         <div className="flex items-center justify-between mb-4">
           <h2 className="text-lg font-bold text-white flex items-center gap-2">
             <Eye className="w-5 h-5 text-cyan-500" />
@@ -77,7 +77,7 @@ export default function SerialNumbersViewModal({
                 className="w-full pl-9 pr-4 py-2 bg-slate-700 border border-slate-600 rounded-lg text-white placeholder-slate-500 focus:outline-none focus:border-cyan-500 text-sm"
               />
             </div>
-            <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+            <div className="grid gap-2" style={{ gridTemplateColumns: 'repeat(auto-fill, minmax(220px, 1fr))' }}>
               {serials
                 .filter((sn) => !searchQuery.trim() || sn.serial_number?.toLowerCase().includes(searchQuery.trim().toLowerCase()))
                 .map((sn) => (
@@ -85,7 +85,7 @@ export default function SerialNumbersViewModal({
                   key={sn.id || sn.serial_number}
                   className="p-3 bg-slate-700/50 border border-slate-600 rounded-lg"
                 >
-                  <p className="text-sm text-white font-mono">{sn.serial_number}</p>
+                  <p className="text-sm text-white font-mono whitespace-nowrap">{sn.serial_number}</p>
                   {sn.cost_price != null && sn.cost_price > 0 && (
                     <p className="text-xs text-green-400 mt-1">Cost: ₹{Number(sn.cost_price).toLocaleString()}</p>
                   )}

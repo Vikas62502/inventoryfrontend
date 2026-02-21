@@ -429,7 +429,7 @@ export default function SaleEditModal({
                         {item.serial_numbers
                           .filter((sn) => !(serialSearchPerItem[index] ?? "").trim() || sn.toLowerCase().includes((serialSearchPerItem[index] ?? "").trim().toLowerCase()))
                           .map((sn, i) => (
-                            <span key={i} className="px-2 py-0.5 bg-slate-700 rounded text-sm text-cyan-300 font-mono">
+                            <span key={i} className="px-2 py-0.5 bg-slate-700 rounded text-sm text-cyan-300 font-mono whitespace-nowrap">
                               {sn}
                             </span>
                           ))}

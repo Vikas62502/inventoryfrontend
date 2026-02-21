@@ -1527,7 +1527,7 @@ Example: SN001, SN002, SN003"
                           {serialNumbers.map((sn, idx) => (
                             <div key={`${sn}-${idx}`} className="flex items-center gap-2">
                               <div className="flex-1 min-w-0">
-                                <p className="text-xs text-slate-400 mb-1 truncate font-mono">{sn}</p>
+                                <p className="text-xs text-slate-400 mb-1 font-mono whitespace-nowrap">{sn}</p>
                                 <input
                                   type="text"
                                   value={serialNumberPrices[sn] !== undefined && serialNumberPrices[sn] !== null ? serialNumberPrices[sn] : ""}
@@ -2351,7 +2351,7 @@ Example: SN001, SN002, SN003"
                             {serialNumbers.map((sn, idx) => (
                               <div key={`${sn}-${idx}`} className="flex items-center gap-2">
                                 <div className="flex-1 min-w-0">
-                                  <p className="text-xs text-slate-400 mb-1 truncate font-mono">{sn}</p>
+                                  <p className="text-xs text-slate-400 mb-1 font-mono whitespace-nowrap">{sn}</p>
                                   <input
                                     type="text"
                                     value={serialNumberPrices[sn] !== undefined && serialNumberPrices[sn] !== null ? serialNumberPrices[sn] : ""}
