@@ -9,6 +9,7 @@ import { Html5Qrcode } from "html5-qrcode"
 import { productsApi, categoriesApi, serialNumbersApi, type SerialNumber } from "@/lib/api"
 import type { Product } from "@/lib/api"
 import { authService } from "@/lib/auth"
+import { extractSerialNumbersFromFile } from "@/lib/parse-excel-serials"
 
 interface ProductModalProps {
   product?: Product | null
@@ -802,12 +803,6 @@ export default function ProductModal({ product, onClose, onSave }: ProductModalP
           // Backend should use this to associate each serial number with product name and category
           productData.product_name = formData.name
           productData.product_category = categoryName
-        } else if (serialNumberExcelFile) {
-          // If using image/excel, backend will extract serial numbers
-          // For now, show error that manual entry is required
-          setError("Please enter serial numbers manually, or wait for backend to support image/Excel extraction")
-          setLoading(false)
-          return
         }
         
         // Add pricing data (cost price for each serial number)
@@ -918,8 +913,12 @@ export default function ProductModal({ product, onClose, onSave }: ProductModalP
         model: formData.model,
         category: categoryName,
         wattage: formData.wattage || undefined,
-        quantity: finalQuantity,
         image: imageFile || undefined,
+      }
+      // When adding stock (stock_to_add > 0), do NOT send quantity – backend must ADD stock_to_add to current quantity.
+      // Sending both can cause backend to subtract (e.g. 15 + 36 → 21 instead of 51).
+      if (!(product?.id && stockToAdd > 0)) {
+        productData.quantity = finalQuantity
       }
       
       // Add serial numbers if stock is being added (for editing existing products)
@@ -948,10 +947,6 @@ export default function ProductModal({ product, onClose, onSave }: ProductModalP
           } else {
             productData.default_price = defaultPrice
           }
-        } else if (serialNumberExcelFile) {
-          setError("Please enter serial numbers manually. Excel extraction will be supported in future updates.")
-          setLoading(false)
-          return
         }
         productData.stock_to_add = stockToAdd
       }
@@ -1414,7 +1409,7 @@ Example: SN001, SN002, SN003"
                   <input
                     type="file"
                     accept=".xlsx,.xls,.csv"
-                    onChange={(e) => {
+                    onChange={async (e) => {
                       const file = e.target.files?.[0]
                       if (file) {
                         if (!file.name.match(/\.(xlsx|xls|csv)$/i)) {
@@ -1425,8 +1420,16 @@ Example: SN001, SN002, SN003"
                           setError("File size must be less than 10MB")
                           return
                         }
-                        setSerialNumberExcelFile(file)
-                        setError(null)
+                        try {
+                          setError(null)
+                          const parsed = await extractSerialNumbersFromFile(file)
+                          setSerialNumberExcelFile(file)
+                          setSerialNumbers(parsed)
+                        } catch (err: any) {
+                          setError(err?.message || "Failed to parse Excel/CSV file")
+                          setSerialNumberExcelFile(null)
+                          setSerialNumbers([])
+                        }
                       }
                     }}
                     className="w-full px-4 py-2 bg-slate-700 border border-slate-600 rounded-lg text-white text-sm file:mr-4 file:py-1 file:px-3 file:rounded-lg file:border-0 file:text-sm file:font-medium file:bg-blue-600 file:text-white hover:file:bg-blue-700"
@@ -1436,21 +1439,39 @@ Example: SN001, SN002, SN003"
                   </p>
                   {serialNumberExcelFile && (
                     <div className="mt-2 p-2 bg-emerald-900/20 border border-emerald-500/50 rounded text-xs text-emerald-300">
-                      ✓ File selected: {serialNumberExcelFile.name}
+                      ✓ File selected: {serialNumberExcelFile.name} ({serialNumbers.length} serial numbers extracted)
+                    </div>
+                  )}
+                  {/* Show extracted serial numbers list */}
+                  {serialNumbers.length > 0 && (
+                    <div className="mt-3 space-y-2">
+                      <p className="text-xs text-slate-400 mb-2">
+                        Extracted: {serialNumbers.length} of {formData.quantity || stockToAdd || 0}
+                      </p>
+                      <div className="flex flex-wrap gap-2 max-h-40 overflow-y-auto p-2 bg-slate-800/50 rounded border border-slate-600">
+                        {serialNumbers.map((sn, idx) => (
+                          <span
+                            key={`${sn}-${idx}`}
+                            className="px-2 py-1 bg-slate-700 text-slate-200 text-xs rounded border border-slate-600 font-mono"
+                          >
+                            {sn}
+                          </span>
+                        ))}
+                      </div>
                     </div>
                   )}
                 </div>
               )}
               
               {/* Validation Message */}
-              {serialNumberMethod !== "excel" && serialNumbers.length > 0 && serialNumbers.length !== formData.quantity && (
+              {serialNumbers.length > 0 && serialNumbers.length !== formData.quantity && (
                 <div className="mt-2 p-2 bg-amber-900/20 border border-amber-500/50 rounded text-xs text-amber-300">
                   <AlertCircle className="w-4 h-4 inline mr-1" />
                   Please enter {formData.quantity} serial numbers. Currently have {serialNumbers.length}.
                 </div>
               )}
               
-              {serialNumberMethod !== "excel" && serialNumbers.length === formData.quantity && formData.quantity > 0 && (
+              {serialNumbers.length === formData.quantity && formData.quantity > 0 && (
                 <div className="mt-2 p-2 bg-emerald-900/20 border border-emerald-500/50 rounded text-xs text-emerald-300">
                   ✓ All {formData.quantity} serial numbers entered
                 </div>
@@ -1579,7 +1600,7 @@ Example: SN001, SN002, SN003"
                 }}
                 disabled={
                   loading || 
-                  (formData.quantity > 0 && serialNumberMethod !== "excel" && serialNumbers.length > 0 && serialNumbers.length !== formData.quantity) ||
+                  (formData.quantity > 0 && serialNumbers.length > 0 && serialNumbers.length !== formData.quantity) ||
                   (formData.quantity > 0 && serialNumbers.length > 0 && !individualPricing && defaultPrice <= 0) ||
                   (formData.quantity > 0 && serialNumbers.length > 0 && individualPricing && serialNumbers.some(sn => !serialNumberPrices[sn] || serialNumberPrices[sn] <= 0))
                 }
@@ -1951,8 +1972,8 @@ Example: SN001, SN002, SN003"
                     if (value === "" || /^\d*\.?\d*$/.test(value)) {
                       const newStockToAdd = value === "" ? 0 : Number.parseFloat(value) || 0
                       setStockToAdd(newStockToAdd)
-                      // Reset serial numbers if quantity changes
-                      if (newStockToAdd !== stockToAdd) {
+                      // Keep existing serial numbers when quantity changes – user may add more
+                      if (newStockToAdd === 0 && stockToAdd !== 0) {
                         setSerialNumbers([])
                         setSerialNumberInput("")
                         setSerialNumberExcelFile(null)
@@ -2239,7 +2260,7 @@ Example: SN001, SN002, SN003"
                       <input
                         type="file"
                         accept=".xlsx,.xls,.csv"
-                        onChange={(e) => {
+                        onChange={async (e) => {
                           const file = e.target.files?.[0]
                           if (file) {
                             if (!file.name.match(/\.(xlsx|xls|csv)$/i)) {
@@ -2250,8 +2271,16 @@ Example: SN001, SN002, SN003"
                               setError("File size must be less than 10MB")
                               return
                             }
-                            setSerialNumberExcelFile(file)
-                            setError(null)
+                            try {
+                              setError(null)
+                              const parsed = await extractSerialNumbersFromFile(file)
+                              setSerialNumberExcelFile(file)
+                              setSerialNumbers(parsed)
+                            } catch (err: any) {
+                              setError(err?.message || "Failed to parse Excel/CSV file")
+                              setSerialNumberExcelFile(null)
+                              setSerialNumbers([])
+                            }
                           }
                         }}
                         className="w-full px-4 py-2 bg-slate-700 border border-slate-600 rounded-lg text-white text-sm file:mr-4 file:py-1 file:px-3 file:rounded-lg file:border-0 file:text-sm file:font-medium file:bg-blue-600 file:text-white hover:file:bg-blue-700"
@@ -2261,21 +2290,39 @@ Example: SN001, SN002, SN003"
                       </p>
                       {serialNumberExcelFile && (
                         <div className="mt-2 p-2 bg-emerald-900/20 border border-emerald-500/50 rounded text-xs text-emerald-300">
-                          ✓ File selected: {serialNumberExcelFile.name}
+                          ✓ File selected: {serialNumberExcelFile.name} ({serialNumbers.length} serial numbers extracted)
+                        </div>
+                      )}
+                      {/* Show extracted serial numbers list */}
+                      {serialNumbers.length > 0 && (
+                        <div className="mt-3 space-y-2">
+                          <p className="text-xs text-slate-400 mb-2">
+                            Extracted: {serialNumbers.length} of {stockToAdd || 0}
+                          </p>
+                          <div className="flex flex-wrap gap-2 max-h-40 overflow-y-auto p-2 bg-slate-800/50 rounded border border-slate-600">
+                            {serialNumbers.map((sn, idx) => (
+                              <span
+                                key={`${sn}-${idx}`}
+                                className="px-2 py-1 bg-slate-700 text-slate-200 text-xs rounded border border-slate-600 font-mono"
+                              >
+                                {sn}
+                              </span>
+                            ))}
+                          </div>
                         </div>
                       )}
                     </div>
                   )}
                   
                   {/* Validation Message */}
-                  {serialNumberMethod !== "excel" && serialNumbers.length > 0 && serialNumbers.length !== stockToAdd && (
+                  {serialNumbers.length > 0 && serialNumbers.length !== stockToAdd && (
                     <div className="mt-2 p-2 bg-amber-900/20 border border-amber-500/50 rounded text-xs text-amber-300">
                       <AlertCircle className="w-4 h-4 inline mr-1" />
                       Please enter {stockToAdd} serial numbers. Currently have {serialNumbers.length}.
                     </div>
                   )}
                   
-                  {serialNumberMethod !== "excel" && serialNumbers.length === stockToAdd && stockToAdd > 0 && (
+                  {serialNumbers.length === stockToAdd && stockToAdd > 0 && (
                     <div className="mt-2 p-2 bg-emerald-900/20 border border-emerald-500/50 rounded text-xs text-emerald-300">
                       ✓ All {stockToAdd} serial numbers entered
                     </div>

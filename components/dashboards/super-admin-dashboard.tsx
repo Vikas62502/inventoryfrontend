@@ -3,19 +3,20 @@
 import { useState, useEffect, useCallback } from "react"
 import { Card } from "@/components/ui/card"
 import { Button } from "@/components/ui/button"
-import { Plus, Edit2, Trash2, Package, Search, TrendingUp, AlertCircle, Loader2, UserPlus, Users, CheckCircle, XCircle, RotateCcw, DollarSign, Eye } from "lucide-react"
+import { Plus, Edit2, Trash2, Package, Search, TrendingUp, AlertCircle, Loader2, UserPlus, Users, CheckCircle, XCircle, RotateCcw, DollarSign, Eye, ShoppingCart, Download } from "lucide-react"
 import ProductModal from "@/components/modals/product-modal"
 import EnhancedRequestApprovalModal from "@/components/modals/enhanced-request-approval-modal"
 import CreateUserModal from "@/components/modals/create-user-modal"
+import SaleEditModal from "@/components/modals/sale-edit-modal"
 import { Tabs, TabsList, TabsTrigger, TabsContent } from "@/components/ui/tabs"
 import { useInventoryState } from "@/hooks/use-inventory-state"
 import { useStockRequestsState } from "@/hooks/use-stock-requests-state"
-import { productsApi, stockRequestsApi, categoriesApi, usersApi, stockReturnsApi } from "@/lib/api"
+import { productsApi, stockRequestsApi, categoriesApi, usersApi, stockReturnsApi, salesApi } from "@/lib/api"
 import { authService, type User } from "@/lib/auth"
 import { formatDateISO } from "@/lib/utils"
+import { generateQuotationPDF } from "@/lib/quotation-generator"
 import { FEATURE_FLAGS } from "@/lib/feature-flags"
-import type { Product } from "@/lib/api"
-import type { StockRequest, StockReturn } from "@/lib/api"
+import type { Product, Sale, StockRequest, StockReturn } from "@/lib/api"
 
 interface SuperAdminDashboardProps {
   userName: string
@@ -70,6 +71,15 @@ export default function SuperAdminDashboard({ userName }: SuperAdminDashboardPro
   const [processingReturnIds, setProcessingReturnIds] = useState<Set<string>>(new Set())
   const [returnsSearchQuery, setReturnsSearchQuery] = useState("")
   const [returnsProducts, setReturnsProducts] = useState<Record<string, Product>>({})
+  
+  // Sales approvals state (same as accounts – super admin or account can approve)
+  const [sales, setSales] = useState<Sale[]>([])
+  const [loadingSales, setLoadingSales] = useState(true)
+  const [approvingSaleId, setApprovingSaleId] = useState<string | null>(null)
+  const [downloadingSaleId, setDownloadingSaleId] = useState<string | null>(null)
+  const [editingSaleId, setEditingSaleId] = useState<string | null>(null)
+  const [salesSearchQuery, setSalesSearchQuery] = useState("")
+  const [salesTypeFilter, setSalesTypeFilter] = useState<"all" | "B2B" | "B2C">("all")
   
   // Tab state
   const [activeTab, setActiveTab] = useState<string>("overview")
@@ -200,6 +210,59 @@ export default function SuperAdminDashboard({ userName }: SuperAdminDashboardPro
   useEffect(() => {
     loadStockReturns()
   }, [loadStockReturns])
+
+  // Fetch all sales (for approvals – super admin or account can approve)
+  useEffect(() => {
+    const fetchSales = async () => {
+      try {
+        setLoadingSales(true)
+        const allSales = await salesApi.getAll()
+        setSales(allSales)
+      } catch (err) {
+        console.error("Failed to fetch sales:", err)
+        setSales([])
+      } finally {
+        setLoadingSales(false)
+      }
+    }
+    fetchSales()
+  }, [])
+
+  const handleApproveSale = async (saleId: string) => {
+    try {
+      setApprovingSaleId(saleId)
+      await salesApi.update(saleId, { approval_status: "approved" } as any)
+      setSales((prev) =>
+        prev.map((s) =>
+          s.id === saleId ? { ...s, approval_status: "approved" } : s
+        )
+      )
+    } catch (err: any) {
+      console.error("Error approving sale:", err)
+      alert(err?.message || "Failed to approve sale")
+    } finally {
+      setApprovingSaleId(null)
+    }
+  }
+
+  const handleDownloadQuotation = async (sale: Sale) => {
+    try {
+      setDownloadingSaleId(sale.id)
+      const fullSale = await salesApi.getById(sale.id)
+      const allProducts = await productsApi.getAll()
+      const productsMap: Record<string, Product> = {}
+      allProducts.forEach(p => { productsMap[p.id] = p })
+      if (!fullSale.items || fullSale.items.length === 0) {
+        throw new Error("Sale has no items")
+      }
+      generateQuotationPDF(fullSale as any, productsMap)
+    } catch (err: any) {
+      console.error("Failed to generate quotation:", err)
+      alert(err?.message || "Failed to generate quotation. Please try again.")
+    } finally {
+      setDownloadingSaleId(null)
+    }
+  }
 
   // Load all admins
   useEffect(() => {
@@ -430,6 +493,23 @@ export default function SuperAdminDashboard({ userName }: SuperAdminDashboardPro
     )
   })
 
+  // Filter and sort sales (for Approvals tab)
+  const filteredSales = sales.filter((sale) => {
+    const matchesType = salesTypeFilter === "all" || sale.type === salesTypeFilter
+    const matchesSearch = !salesSearchQuery.trim() ||
+      (sale.customer_name?.toLowerCase().includes(salesSearchQuery.toLowerCase()) ||
+       sale.company_name?.toLowerCase().includes(salesSearchQuery.toLowerCase()) || false)
+    return matchesType && matchesSearch
+  })
+  const sortedSales = [...filteredSales].sort((a, b) => {
+    const dateA = (a as any).created_at ? new Date((a as any).created_at).getTime() : 0
+    const dateB = (b as any).created_at ? new Date((b as any).created_at).getTime() : 0
+    return dateB - dateA
+  })
+  const pendingSalesCount = sales.filter((s) =>
+    (s as any).approval_status !== "approved" && s.payment_status !== "completed"
+  ).length
+
   // Filter stock returns by search
   const filteredStockReturns = stockReturns.filter((ret) => {
     if (!returnsSearchQuery.trim()) return true
@@ -521,9 +601,9 @@ export default function SuperAdminDashboard({ userName }: SuperAdminDashboardPro
               <TrendingUp className="w-3.5 h-3.5 sm:w-4 sm:h-4 mr-1.5" />
               <span>Stock Requests</span>
             </TabsTrigger>
-            <TabsTrigger value="agent-approvals" className="data-[state=active]:bg-cyan-600 data-[state=active]:text-white text-slate-300 bg-slate-800 hover:bg-slate-700 text-[11px] sm:text-xs px-3 py-2 rounded-md transition-all flex items-center justify-center">
-              <Users className="w-3.5 h-3.5 sm:w-4 sm:h-4 mr-1.5" />
-              <span>Agent Approvals</span>
+            <TabsTrigger value="approvals" className="data-[state=active]:bg-cyan-600 data-[state=active]:text-white text-slate-300 bg-slate-800 hover:bg-slate-700 text-[11px] sm:text-xs px-3 py-2 rounded-md transition-all flex items-center justify-center">
+              <CheckCircle className="w-3.5 h-3.5 sm:w-4 sm:h-4 mr-1.5" />
+              <span>Approvals</span>
             </TabsTrigger>
             <TabsTrigger value="returns" className="data-[state=active]:bg-orange-600 data-[state=active]:text-white text-slate-300 bg-slate-800 hover:bg-slate-700 text-[11px] sm:text-xs px-3 py-2 rounded-md transition-all flex items-center justify-center">
               <RotateCcw className="w-3.5 h-3.5 sm:w-4 sm:h-4 mr-1.5" />
@@ -767,7 +847,7 @@ export default function SuperAdminDashboard({ userName }: SuperAdminDashboardPro
           </div>
         </TabsContent>
 
-        <TabsContent value="agent-approvals" className="mt-[60px] md:mt-0 space-y-6">
+        <TabsContent value="approvals" className="mt-[60px] md:mt-0 space-y-6">
           {/* Pending Agent Approvals Section */}
           {filteredPendingAgents.length > 0 ? (
             <div className="space-y-4">
@@ -1055,6 +1135,182 @@ export default function SuperAdminDashboard({ userName }: SuperAdminDashboardPro
               })()}
             </div>
           )}
+
+          {/* Sales Approvals Section – Super Admin or Account can approve */}
+          <div className="mt-8 space-y-4">
+            <h2 className="text-xl font-bold text-white flex items-center gap-2">
+              <ShoppingCart className="w-5 h-5 text-green-500" />
+              Sales Approvals
+              {pendingSalesCount > 0 && (
+                <span className="text-sm font-normal text-amber-400">({pendingSalesCount} pending)</span>
+              )}
+            </h2>
+
+            <div className="flex flex-col sm:flex-row gap-3">
+              <div className="flex-1 relative">
+                <Search className="w-4 h-4 absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" />
+                <input
+                  type="text"
+                  placeholder="Search by customer or company name..."
+                  value={salesSearchQuery}
+                  onChange={(e) => setSalesSearchQuery(e.target.value)}
+                  className="w-full pl-10 pr-4 py-2 bg-slate-700 border border-slate-600 rounded-lg text-white placeholder-slate-500 focus:outline-none focus:border-cyan-500"
+                />
+              </div>
+              <div className="flex gap-2">
+                <Button
+                  variant={salesTypeFilter === "all" ? "default" : "outline"}
+                  onClick={() => setSalesTypeFilter("all")}
+                  className="border-slate-600 text-slate-300 hover:bg-slate-700 text-sm"
+                >
+                  All
+                </Button>
+                <Button
+                  variant={salesTypeFilter === "B2B" ? "default" : "outline"}
+                  onClick={() => setSalesTypeFilter("B2B")}
+                  className="border-slate-600 text-slate-300 hover:bg-slate-700 text-sm"
+                >
+                  B2B
+                </Button>
+                <Button
+                  variant={salesTypeFilter === "B2C" ? "default" : "outline"}
+                  onClick={() => setSalesTypeFilter("B2C")}
+                  className="border-slate-600 text-slate-300 hover:bg-slate-700 text-sm"
+                >
+                  B2C
+                </Button>
+              </div>
+            </div>
+
+            {loadingSales ? (
+              <Card className="bg-slate-800 border-slate-700 p-8 text-center">
+                <Loader2 className="w-8 h-8 text-cyan-500 animate-spin mx-auto mb-4" />
+                <p className="text-slate-400">Loading sales...</p>
+              </Card>
+            ) : (
+              <Card className="bg-slate-800 border-slate-700 p-4">
+                <div className="overflow-x-auto">
+                  <table className="w-full">
+                    <thead>
+                      <tr className="border-b border-slate-700">
+                        <th className="text-left py-3 px-4 text-sm font-semibold text-slate-300">Customer</th>
+                        <th className="text-left py-3 px-4 text-sm font-semibold text-slate-300">Type</th>
+                        <th className="text-left py-3 px-4 text-sm font-semibold text-slate-300">Agent</th>
+                        <th className="text-left py-3 px-4 text-sm font-semibold text-slate-300">Amount</th>
+                        <th className="text-left py-3 px-4 text-sm font-semibold text-slate-300">Date</th>
+                        <th className="text-left py-3 px-4 text-sm font-semibold text-slate-300">Status</th>
+                        <th className="text-right py-3 px-4 text-sm font-semibold text-slate-300">Actions</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {sortedSales.length > 0 ? (
+                        sortedSales.map((sale) => (
+                          <tr key={sale.id} className="border-b border-slate-700/50 hover:bg-slate-700/30 transition-colors">
+                            <td className="py-4 px-4">
+                              <p className="text-white font-medium">{sale.company_name || sale.customer_name}</p>
+                            </td>
+                            <td className="py-4 px-4">
+                              <span
+                                className={`px-2 py-1 text-xs font-semibold rounded-full ${
+                                  sale.type === "B2B"
+                                    ? "bg-blue-500/20 text-blue-400 border border-blue-500/50"
+                                    : "bg-cyan-500/20 text-cyan-400 border border-cyan-500/50"
+                                }`}
+                              >
+                                {sale.type}
+                              </span>
+                            </td>
+                            <td className="py-4 px-4">
+                              <p className="text-slate-300 text-sm">
+                                {(sale as any).created_by_name ?? (sale as any).agent_name ?? (sale as any).created_by?.name ?? "N/A"}
+                              </p>
+                            </td>
+                            <td className="py-4 px-4">
+                              <p className="text-white font-bold text-emerald-400">
+                                ₹{(sale.total_amount || (sale as any).totalAmount || 0).toLocaleString()}
+                              </p>
+                            </td>
+                            <td className="py-4 px-4">
+                              <p className="text-slate-400 text-sm">
+                                {formatDateISO((sale as any).created_at ?? (sale as any).sale_date ?? sale.updated_at)}
+                              </p>
+                            </td>
+                            <td className="py-4 px-4">
+                              {((sale as any).approval_status === "approved" || sale.payment_status === "completed") ? (
+                                <span className="inline-flex items-center gap-1 px-2 py-1 rounded-full text-xs font-medium bg-green-500/10 text-green-500 border border-green-500/20">
+                                  <CheckCircle className="w-3 h-3" />
+                                  Approved
+                                </span>
+                              ) : (
+                                <span className="inline-flex items-center gap-1 px-2 py-1 rounded-full text-xs font-medium bg-amber-500/10 text-amber-500 border border-amber-500/20">
+                                  <AlertCircle className="w-3 h-3" />
+                                  Pending
+                                </span>
+                              )}
+                            </td>
+                            <td className="py-4 px-4">
+                              <div className="flex items-center justify-end gap-2">
+                                <Button
+                                  size="sm"
+                                  variant="outline"
+                                  onClick={() => setEditingSaleId(sale.id)}
+                                  className="border-slate-500 text-slate-300 hover:bg-slate-700"
+                                  title="Edit sale"
+                                >
+                                  <Edit2 className="w-4 h-4" />
+                                </Button>
+                                {((sale as any).approval_status !== "approved" && sale.payment_status !== "completed") && (
+                                  <Button
+                                    size="sm"
+                                    onClick={() => handleApproveSale(sale.id)}
+                                    disabled={approvingSaleId === sale.id}
+                                    className="bg-green-600 hover:bg-green-700 text-white"
+                                  >
+                                    {approvingSaleId === sale.id ? (
+                                      <Loader2 className="w-4 h-4 animate-spin" />
+                                    ) : (
+                                      <>
+                                        <CheckCircle className="w-4 h-4 mr-1" />
+                                        Approve
+                                      </>
+                                    )}
+                                  </Button>
+                                )}
+                                {((sale as any).approval_status === "approved" || sale.payment_status === "completed") && (
+                                  <Button
+                                    size="sm"
+                                    onClick={() => handleDownloadQuotation(sale)}
+                                    disabled={downloadingSaleId === sale.id}
+                                    variant="outline"
+                                    className="border-blue-600 text-blue-400 hover:bg-blue-950"
+                                  >
+                                    {downloadingSaleId === sale.id ? (
+                                      <Loader2 className="w-4 h-4 animate-spin" />
+                                    ) : (
+                                      <>
+                                        <Download className="w-4 h-4 mr-1" />
+                                        Download
+                                      </>
+                                    )}
+                                  </Button>
+                                )}
+                              </div>
+                            </td>
+                          </tr>
+                        ))
+                      ) : (
+                        <tr>
+                          <td colSpan={7} className="py-8 text-center text-slate-400">
+                            No sales found
+                          </td>
+                        </tr>
+                      )}
+                    </tbody>
+                  </table>
+                </div>
+              </Card>
+            )}
+          </div>
         </TabsContent>
 
         <TabsContent value="returns" className="mt-[60px] md:mt-0">
@@ -1835,6 +2091,17 @@ export default function SuperAdminDashboard({ userName }: SuperAdminDashboardPro
             } catch (err) {
               console.error("Failed to reload users:", err)
             }
+          }}
+        />
+      )}
+
+      {editingSaleId && (
+        <SaleEditModal
+          saleId={editingSaleId}
+          onClose={() => setEditingSaleId(null)}
+          onSuccess={(updated) => {
+            setSales((prev) => prev.map((s) => (s.id === updated.id ? updated : s)))
+            setEditingSaleId(null)
           }}
         />
       )}

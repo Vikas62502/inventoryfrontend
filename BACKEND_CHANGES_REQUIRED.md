@@ -197,6 +197,12 @@ stock_to_add: 5
 ```
 *No serial_numbers field – backend should increment product quantity by 5.*
 
+**CRITICAL – stock_to_add must ADD, not subtract:**
+When `stock_to_add` is provided, the backend must compute: `new_quantity = current_quantity + stock_to_add`.
+- Example: current=15, stock_to_add=36 → new_quantity=51 ✓
+- Wrong: new_quantity = stock_to_add - current_quantity (would give 21) ✗
+The frontend does NOT send `quantity` when `stock_to_add` is present, to avoid conflicts. Backend must ADD.
+
 ### Assign serial numbers to existing stock (Panels, Inverters, Meter)
 
 When a product has stock but no serial numbers assigned (e.g. created before serial tracking), the frontend allows "assigning" serial numbers to existing stock:
