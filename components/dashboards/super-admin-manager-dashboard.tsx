@@ -3,7 +3,7 @@
 import { useState, useEffect, useCallback } from "react"
 import { Card } from "@/components/ui/card"
 import { Button } from "@/components/ui/button"
-import { Plus, Edit2, Trash2, Package, Search, Loader2 } from "lucide-react"
+import { Plus, Edit2, Trash2, Package, Search, Loader2, Download } from "lucide-react"
 import ProductModal from "@/components/modals/product-modal"
 import { productsApi, categoriesApi } from "@/lib/api"
 import type { Product } from "@/lib/api"
@@ -143,6 +143,44 @@ export default function SuperAdminManagerDashboard({ userName }: SuperAdminManag
   const totalStock = products.reduce((sum, p) => sum + getProductStock(p), 0)
   const lowStockCount = products.filter(p => getProductStock(p) < 10).length
 
+  const handleDownloadStock = () => {
+    const rows = filteredProducts.map((p) => ({
+      product: p.name || "",
+      category: p.category || "",
+      model: p.model || "",
+      wattage: p.wattage || "",
+      stock: getProductStock(p),
+      unit: getProductUnit(p) || "",
+    }))
+
+    const headers = ["Product", "Category", "Model", "Wattage", "Stock", "Unit"]
+    const escapeCsv = (value: string | number) => {
+      const str = String(value ?? "")
+      if (str.includes(",") || str.includes("\"") || str.includes("\n")) {
+        return `"${str.replace(/"/g, "\"\"")}"`
+      }
+      return str
+    }
+
+    const csv = [
+      headers.join(","),
+      ...rows.map((r) =>
+        [r.product, r.category, r.model, r.wattage, r.stock, r.unit].map(escapeCsv).join(",")
+      ),
+    ].join("\n")
+
+    const blob = new Blob([csv], { type: "text/csv;charset=utf-8;" })
+    const url = URL.createObjectURL(blob)
+    const link = document.createElement("a")
+    const date = new Date().toISOString().slice(0, 10)
+    link.href = url
+    link.download = `stock-report-${date}.csv`
+    document.body.appendChild(link)
+    link.click()
+    document.body.removeChild(link)
+    URL.revokeObjectURL(url)
+  }
+
   return (
     <div className="max-w-7xl mx-auto space-y-6 p-6">
       {/* Header */}
@@ -191,16 +229,26 @@ export default function SuperAdminManagerDashboard({ userName }: SuperAdminManag
             <Package className="w-5 h-5 text-blue-500" />
             Products Catalog
           </h2>
-          <Button
-            onClick={() => {
-              setEditingProduct(null)
-              setShowProductModal(true)
-            }}
-            className="bg-blue-600 hover:bg-blue-700 text-white"
-          >
-            <Plus className="w-4 h-4 mr-2" />
-            Add Product
-          </Button>
+          <div className="flex items-center gap-2">
+            <Button
+              onClick={handleDownloadStock}
+              variant="outline"
+              className="border-cyan-600 text-cyan-400 hover:bg-cyan-950"
+            >
+              <Download className="w-4 h-4 mr-2" />
+              Download Stock
+            </Button>
+            <Button
+              onClick={() => {
+                setEditingProduct(null)
+                setShowProductModal(true)
+              }}
+              className="bg-blue-600 hover:bg-blue-700 text-white"
+            >
+              <Plus className="w-4 h-4 mr-2" />
+              Add Product
+            </Button>
+          </div>
         </div>
 
         {/* Search and Filter */}

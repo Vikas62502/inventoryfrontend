@@ -822,10 +822,38 @@ export default function ProductModal({ product, onClose, onSave }: ProductModalP
         productData.selling_price = sellingPriceOverride
       }
       
-      // Create product with serial numbers and pricing
-      const created = await productsApi.create(productData)
+      // Step 2 behavior:
+      // - If Step 1 already created product, attach serial numbers via update
+      // - Else (fallback), create directly with current payload
+      let created: Product
+      if (createdProductId) {
+        const updateData: any = {}
+        if (quantity > 0 && serialNumbers.length > 0) {
+          updateData.stock_to_add = quantity
+          updateData.serial_numbers = serialNumbers
+          updateData.product_name = formData.name
+          updateData.product_category = categoryName
+          if (individualPricing) {
+            updateData.serial_number_prices = serialNumberPrices
+          } else {
+            updateData.default_price = defaultPrice
+          }
+        }
+        if (isSuperAdmin && sellingPriceOverride > 0) {
+          updateData.use_max_cost_price = false
+          updateData.selling_price = sellingPriceOverride
+        }
+
+        if (Object.keys(updateData).length > 0) {
+          created = await productsApi.update(createdProductId, updateData)
+        } else {
+          created = await productsApi.getById(createdProductId)
+        }
+      } else {
+        created = await productsApi.create(productData)
+      }
       
-      // Ensure serial_numbers are on the created product (for View All fallback if backend doesn't return them)
+      // Ensure serial_numbers are on the created/updated product (for View All fallback if backend doesn't return them)
       const createdWithSerials = serialNumbers.length > 0
         ? { ...created, serial_numbers: created.serial_numbers ?? serialNumbers }
         : created
@@ -1069,12 +1097,25 @@ export default function ProductModal({ product, onClose, onSave }: ProductModalP
         onSave(updated)
         }
       } else {
-        // Create new product - Step 1: Just validate and move to Step 2
-        // Product will be created in Step 2 after serial numbers are entered
-        // Always move to step 2 (even if quantity is 0)
+        // Create new product in Step 1, then attach serials/pricing in Step 2.
+        // This avoids permission issues on multipart create payloads in some backends.
+        const createData: any = {
+          name: formData.name,
+          model: formData.model,
+          category: categoryName,
+          wattage: formData.wattage || undefined,
+          quantity: formData.quantity || 0,
+          unit: formData.unit,
+          image: imageFile || undefined,
+          unit_price: formData.price && formData.price > 0 ? formData.price : 0,
+        }
+        if (isSuperAdmin && sellingPriceOverride > 0) {
+          createData.selling_price = sellingPriceOverride
+        }
+        const created = await productsApi.create(createData)
+        setCreatedProductId(created.id)
         setCurrentStep(2)
         setLoading(false)
-        // Product will be created in handleSerialNumbersSubmit
       }
     } catch (err: any) {
       setError(err.message || "Failed to save product")
