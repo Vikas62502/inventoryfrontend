@@ -942,11 +942,7 @@ export default function ProductModal({ product, onClose, onSave }: ProductModalP
         category: categoryName,
         wattage: formData.wattage || undefined,
         image: imageFile || undefined,
-      }
-      // When adding stock (stock_to_add > 0), do NOT send quantity – backend must ADD stock_to_add to current quantity.
-      // Sending both can cause backend to subtract (e.g. 15 + 36 → 21 instead of 51).
-      if (!(product?.id && stockToAdd > 0)) {
-        productData.quantity = finalQuantity
+        quantity: finalQuantity,
       }
       
       // Add serial numbers if stock is being added (for editing existing products)
@@ -996,16 +992,16 @@ export default function ProductModal({ product, onClose, onSave }: ProductModalP
       // Include price if provided (for all users)
       // unit_price = cost price (same concept). selling_price = separate field set by Super Admin.
       if (isSuperAdmin && product?.id) {
-        // Super Admin: set selling_price only (do NOT overwrite unit_price/cost price)
-        // Manual override takes precedence: when user enters a price, use it (not max cost)
+        // Super Admin: selling_price + optional cost (Unit Price field)
         if (sellingPriceOverride > 0) {
           productData.use_max_cost_price = false
           productData.selling_price = sellingPriceOverride
         } else {
           productData.use_max_cost_price = useMaxCostForSelling
         }
-        // When use_max_cost_price true and no manual override, backend uses max cost from serials
-        // Do NOT send unit_price - it is cost price and stays unchanged
+        if (formData.price > 0) {
+          productData.unit_price = formData.price
+        }
       } else if (formData.price && formData.price > 0) {
         productData.unit_price = formData.price
       } else if (product) {
@@ -1042,6 +1038,7 @@ export default function ProductModal({ product, onClose, onSave }: ProductModalP
               const batchData: any = {
                 ...productData,
                 stock_to_add: chunk,
+                quantity: currentStock + chunk,
                 serial_numbers: serials.length > 0 ? serials.slice(serialOffset, serialOffset + chunk) : undefined,
               }
               if (!batchData.serial_numbers?.length) delete batchData.serial_numbers

@@ -4,7 +4,9 @@ import { useState, useEffect, useCallback } from "react"
 import { Card } from "@/components/ui/card"
 import { Button } from "@/components/ui/button"
 import { Plus, Edit2, Trash2, Package, Search, Loader2, Download } from "lucide-react"
+import { Tabs, TabsList, TabsTrigger, TabsContent } from "@/components/ui/tabs"
 import ProductModal from "@/components/modals/product-modal"
+import AccountDashboard from "@/components/dashboards/account-dashboard"
 import { productsApi, categoriesApi } from "@/lib/api"
 import type { Product } from "@/lib/api"
 
@@ -13,6 +15,7 @@ interface SuperAdminManagerDashboardProps {
 }
 
 export default function SuperAdminManagerDashboard({ userName }: SuperAdminManagerDashboardProps) {
+  const [activeTab, setActiveTab] = useState<string>("products")
   const [products, setProducts] = useState<Product[]>([])
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
@@ -189,41 +192,52 @@ export default function SuperAdminManagerDashboard({ userName }: SuperAdminManag
         <p className="text-slate-400">Welcome {userName}</p>
       </div>
 
-      {/* Key Metrics */}
-      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
-        <Card className="bg-gradient-to-br from-blue-950 to-slate-900 border-blue-700 p-6">
-          <div className="flex items-center justify-between">
-            <div>
-              <p className="text-slate-400 text-sm mb-1">Total Products</p>
-              <p className="text-3xl font-bold text-white">{products.length}</p>
-            </div>
-            <Package className="w-8 h-8 text-blue-500 opacity-50" />
-          </div>
-        </Card>
+      <Tabs value={activeTab} onValueChange={setActiveTab} className="w-full">
+        <TabsList className="bg-slate-900 border border-slate-700 p-1 grid grid-cols-1 sm:grid-cols-2 gap-1 h-auto w-full">
+          <TabsTrigger value="products" className="data-[state=active]:bg-blue-600 data-[state=active]:text-white text-slate-300">
+            Product Management
+          </TabsTrigger>
+          <TabsTrigger value="accounts" className="data-[state=active]:bg-cyan-600 data-[state=active]:text-white text-slate-300">
+            Approvals & Payments
+          </TabsTrigger>
+        </TabsList>
 
-        <Card className="bg-gradient-to-br from-cyan-950 to-slate-900 border-cyan-700 p-6">
-          <div className="flex items-center justify-between">
-            <div>
-              <p className="text-slate-400 text-sm mb-1">Total Stock</p>
-              <p className="text-3xl font-bold text-cyan-400">{totalStock}</p>
-            </div>
-            <Package className="w-8 h-8 text-cyan-500 opacity-50" />
-          </div>
-        </Card>
+        <TabsContent value="products" className="space-y-6 mt-6">
+          {/* Key Metrics */}
+          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
+            <Card className="bg-gradient-to-br from-blue-950 to-slate-900 border-blue-700 p-6">
+              <div className="flex items-center justify-between">
+                <div>
+                  <p className="text-slate-400 text-sm mb-1">Total Products</p>
+                  <p className="text-3xl font-bold text-white">{products.length}</p>
+                </div>
+                <Package className="w-8 h-8 text-blue-500 opacity-50" />
+              </div>
+            </Card>
 
-        <Card className="bg-gradient-to-br from-red-950 to-slate-900 border-red-700 p-6">
-          <div className="flex items-center justify-between">
-            <div>
-              <p className="text-slate-400 text-sm mb-1">Low Stock Items</p>
-              <p className="text-3xl font-bold text-red-400">{lowStockCount}</p>
-            </div>
-            <Package className="w-8 h-8 text-red-500 opacity-50" />
-          </div>
-        </Card>
-      </div>
+            <Card className="bg-gradient-to-br from-cyan-950 to-slate-900 border-cyan-700 p-6">
+              <div className="flex items-center justify-between">
+                <div>
+                  <p className="text-slate-400 text-sm mb-1">Total Stock</p>
+                  <p className="text-3xl font-bold text-cyan-400">{totalStock}</p>
+                </div>
+                <Package className="w-8 h-8 text-cyan-500 opacity-50" />
+              </div>
+            </Card>
 
-      {/* Products Catalog */}
-      <Card className="bg-slate-800 border-slate-700 p-6">
+            <Card className="bg-gradient-to-br from-red-950 to-slate-900 border-red-700 p-6">
+              <div className="flex items-center justify-between">
+                <div>
+                  <p className="text-slate-400 text-sm mb-1">Low Stock Items</p>
+                  <p className="text-3xl font-bold text-red-400">{lowStockCount}</p>
+                </div>
+                <Package className="w-8 h-8 text-red-500 opacity-50" />
+              </div>
+            </Card>
+          </div>
+
+          {/* Products Catalog */}
+          <Card className="bg-slate-800 border-slate-700 p-6">
         <div className="flex items-center justify-between mb-6">
           <h2 className="text-xl font-bold text-white flex items-center gap-2">
             <Package className="w-5 h-5 text-blue-500" />
@@ -421,7 +435,13 @@ export default function SuperAdminManagerDashboard({ userName }: SuperAdminManag
             </div>
           </>
         )}
-      </Card>
+          </Card>
+        </TabsContent>
+
+        <TabsContent value="accounts" className="mt-6">
+          <AccountDashboard userName={userName} />
+        </TabsContent>
+      </Tabs>
 
       {/* Modals */}
       {showProductModal && (
