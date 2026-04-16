@@ -3,9 +3,10 @@
 import { useState, useEffect, useCallback } from "react"
 import { Card } from "@/components/ui/card"
 import { Button } from "@/components/ui/button"
-import { Plus, Edit2, Trash2, Package, Search, Loader2, Download } from "lucide-react"
+import { Plus, Edit2, Trash2, Package, Search, Loader2, Download, History } from "lucide-react"
 import { Tabs, TabsList, TabsTrigger, TabsContent } from "@/components/ui/tabs"
 import ProductModal from "@/components/modals/product-modal"
+import ProductStockHistoryModal from "@/components/modals/product-stock-history-modal"
 import AccountDashboard from "@/components/dashboards/account-dashboard"
 import { productsApi, categoriesApi } from "@/lib/api"
 import type { Product } from "@/lib/api"
@@ -22,6 +23,7 @@ export default function SuperAdminManagerDashboard({ userName }: SuperAdminManag
   const [showProductModal, setShowProductModal] = useState(false)
   const [recentlyCreatedSerials, setRecentlyCreatedSerials] = useState<Record<string, string[]>>({})
   const [editingProduct, setEditingProduct] = useState<Product | null>(null)
+  const [historyProduct, setHistoryProduct] = useState<Product | null>(null)
   const [searchTerm, setSearchTerm] = useState("")
   const [categoryFilter, setCategoryFilter] = useState<string | null>(null)
   const [categories, setCategories] = useState<string[]>([])
@@ -350,6 +352,15 @@ export default function SuperAdminManagerDashboard({ userName }: SuperAdminManag
                           <Button
                             size="sm"
                             variant="outline"
+                            onClick={() => setHistoryProduct(product)}
+                            className="border-cyan-600 text-cyan-400 hover:bg-cyan-950"
+                            title="View stock history"
+                          >
+                            <History className="w-3 h-3" />
+                          </Button>
+                          <Button
+                            size="sm"
+                            variant="outline"
                             onClick={() => handleEditProduct(product)}
                             className="border-slate-600 text-slate-300 hover:bg-slate-700"
                           >
@@ -409,6 +420,15 @@ export default function SuperAdminManagerDashboard({ userName }: SuperAdminManag
                     <Button
                       size="sm"
                       variant="outline"
+                      onClick={() => setHistoryProduct(product)}
+                      className="flex-1 border-cyan-600 text-cyan-400 hover:bg-cyan-950"
+                    >
+                      <History className="w-3 h-3 mr-2" />
+                      History
+                    </Button>
+                    <Button
+                      size="sm"
+                      variant="outline"
                       onClick={() => handleEditProduct(product)}
                       className="flex-1 border-slate-600 text-slate-300 hover:bg-slate-700"
                     >
@@ -459,6 +479,12 @@ export default function SuperAdminManagerDashboard({ userName }: SuperAdminManag
             setEditingProduct(null)
           }}
           onSave={handleAddProduct}
+        />
+      )}
+      {historyProduct && (
+        <ProductStockHistoryModal
+          product={historyProduct}
+          onClose={() => setHistoryProduct(null)}
         />
       )}
     </div>
