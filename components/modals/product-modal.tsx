@@ -829,7 +829,9 @@ export default function ProductModal({ product, onClose, onSave }: ProductModalP
       if (createdProductId) {
         const updateData: any = {}
         if (quantity > 0 && serialNumbers.length > 0) {
-          updateData.stock_to_add = quantity
+          // Step 1 already created product with full quantity.
+          // In Step 2 we only attach serial numbers/pricing, not add stock again.
+          updateData.stock_to_add = 0
           updateData.serial_numbers = serialNumbers
           updateData.product_name = formData.name
           updateData.product_category = categoryName
