@@ -525,24 +525,27 @@
     "category": "Structural Components"
   },
   {
-    "id": "17mm-2mtr-cbr",
+    "id": "nut-bolt-5inch-4suit",
     "name": "Nut Bolt 5inch 4suit",
     "rate": 340.00,
     "unit": "KGS",
+    "weight_per_piece_kg": 0.45,
     "category": "Structural Components"
   },
   {
-    "id": "17mm-2mtr-cbr",
+    "id": "nut-bolt-5inch-3suit",
     "name": "Nut Bolt 5inch 3suit",
     "rate": 340.00,
     "unit": "KGS",
+    "weight_per_piece_kg": 0.35,
     "category": "Structural Components"
   },
   {
-    "id": "17mm-2mtr-cbr",
+    "id": "j-hook-40-40",
     "name": "J hook 40*40",
     "rate": 340.00,
     "unit": "KGS",
+    "weight_per_piece_kg": 0.25,
     "category": "Structural Components"
   },
  

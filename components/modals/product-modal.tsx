@@ -10,6 +10,7 @@ import { productsApi, categoriesApi, serialNumbersApi, type SerialNumber } from 
 import type { Product } from "@/lib/api"
 import { authService } from "@/lib/auth"
 import { extractSerialNumbersFromFile } from "@/lib/parse-excel-serials"
+import { formatProductSaveError, sanitizeDecimalInput, parseDecimalInput, isKilogramUnit, convertKgWeightToPieces } from "@/lib/utils"
 
 interface ProductModalProps {
   product?: Product | null
@@ -96,6 +97,76 @@ export default function ProductModal({ product, onClose, onSave }: ProductModalP
   const [sellingPriceOverride, setSellingPriceOverride] = useState<number>(0)
   const [defaultPrice, setDefaultPrice] = useState<number>(0)
   const [serialNumberPrices, setSerialNumberPrices] = useState<Record<string, number>>({})
+  const [priceText, setPriceText] = useState("")
+  const [defaultPriceText, setDefaultPriceText] = useState("")
+  const [sellingPriceText, setSellingPriceText] = useState("")
+  const [pieceWeightText, setPieceWeightText] = useState("")
+  const [pieceWeightKg, setPieceWeightKg] = useState<number>(0)
+  const [quantityText, setQuantityText] = useState("")
+  const [stockToAddText, setStockToAddText] = useState("")
+
+  const getRefProduct = (productName?: string) =>
+    referenceData.find((item: any) => item.name === (productName || formData.name))
+
+  const isKgProduct =
+    isKilogramUnit(getRefProduct()?.unit) || isKilogramUnit(formData.unit)
+
+  const applyPieceWeightFromRef = (productName: string) => {
+    const ref = referenceData.find((item: any) => item.name === productName)
+    const weight = ref?.weight_per_piece_kg
+    if (typeof weight === "number" && weight > 0) {
+      setPieceWeightKg(weight)
+      setPieceWeightText(String(weight))
+    } else {
+      setPieceWeightKg(0)
+      setPieceWeightText("")
+    }
+  }
+
+  const resolveInventoryForSave = (
+    weightOrQty: number,
+    mode: "create" | "addStock"
+  ): { quantity: number; unit: string; error?: string } => {
+    if (!isKgProduct) {
+      return {
+        quantity: weightOrQty,
+        unit: formData.unit,
+      }
+    }
+
+    const refWeight = getRefProduct()?.weight_per_piece_kg
+    const pieceWeight =
+      parseDecimalInput(pieceWeightText) ||
+      pieceWeightKg ||
+      (typeof refWeight === "number" ? refWeight : 0)
+    if (pieceWeight <= 0) {
+      return { quantity: 0, unit: unitDisplayMap.PCS, error: "Enter weight per piece (kg) for this product." }
+    }
+
+    const pieces = convertKgWeightToPieces(weightOrQty, pieceWeight)
+    if (pieces <= 0) {
+      return {
+        quantity: 0,
+        unit: unitDisplayMap.PCS,
+        error:
+          mode === "addStock"
+            ? "Weight entered is too low — must convert to at least 1 piece."
+            : "Total weight is too low — must convert to at least 1 piece.",
+      }
+    }
+
+    return { quantity: pieces, unit: unitDisplayMap.PCS }
+  }
+
+  const kgPreviewPieces = (weightKg: number) => {
+    const refWeight = getRefProduct()?.weight_per_piece_kg
+    const pieceWeight =
+      parseDecimalInput(pieceWeightText) ||
+      pieceWeightKg ||
+      (typeof refWeight === "number" ? refWeight : 0)
+    if (pieceWeight <= 0 || weightKg <= 0) return null
+    return convertKgWeightToPieces(weightKg, pieceWeight)
+  }
   
   // Camera barcode scanning
   const [isScanning, setIsScanning] = useState(false)
@@ -193,6 +264,7 @@ export default function ProductModal({ product, onClose, onSave }: ProductModalP
       const currentStock = product.quantity || product.central_stock || 0
       setExistingStock(currentStock)
       setStockToAdd(0) // Reset stock to add when product changes
+      setStockToAddText("")
       setSerialNumbers([]) // Reset serial numbers
       setSerialNumbersForExisting([]) // Reset assign-to-existing serials
       setSerialNumberInput("") // Reset serial number input
@@ -202,11 +274,17 @@ export default function ProductModal({ product, onClose, onSave }: ProductModalP
       setDefaultPrice(0) // Reset default price
       setSerialNumberPrices({}) // Reset individual prices
       setUseMaxCostForSelling(true) // Reset selling price mode
-      setSellingPriceOverride((product.selling_price ?? product.unit_price ?? product.price ?? 0) || 0) // Pre-fill from product
-      setCurrentStep(1) // Reset to step 1
+      const initialSelling = (product.selling_price ?? product.unit_price ?? product.price ?? 0) || 0
+      setSellingPriceOverride(initialSelling)
+      setSellingPriceText(initialSelling > 0 ? String(initialSelling) : "")
+      const initialPrice = product.unit_price || product.price || 0
+      setPriceText(initialPrice > 0 ? String(initialPrice) : "")
+      setQuantityText(currentStock > 0 ? String(currentStock) : "")
+      setDefaultPriceText("")
+      setDefaultPrice(0)
+      applyPieceWeightFromRef(product.name)
       setCreatedProductId(null) // Reset created product ID
-      
-      // Fetch assigned serial numbers for this product
+      setCurrentStep(1) // Reset to step 1
       if (product.id) {
         const fetchSerialNumbers = async () => {
           try {
@@ -254,6 +332,13 @@ export default function ProductModal({ product, onClose, onSave }: ProductModalP
     } else {
       // Reset when no product (create mode)
       setAssignedSerialNumbers([])
+      setPriceText("")
+      setQuantityText("")
+      setStockToAddText("")
+      setDefaultPriceText("")
+      setSellingPriceText("")
+      setPieceWeightText("")
+      setPieceWeightKg(0)
     }
     if (product?.name && referenceData.length > 0) {
       const refProduct = referenceData.find((item: any) => item.name === product.name)
@@ -263,12 +348,28 @@ export default function ProductModal({ product, onClose, onSave }: ProductModalP
           ...prev,
           unit: unitDisplay,
         }))
+        applyPieceWeightFromRef(product.name)
       }
     }
   }, [product, referenceData])
 
+  useEffect(() => {
+    if (formData.name && referenceData.length > 0) {
+      applyPieceWeightFromRef(formData.name)
+    }
+  }, [formData.name, referenceData])
+
   // Barcode/serial numbers required for Panels, Inverters, Meter; optional for others
-  const BARCODE_REQUIRED_CATEGORIES = ["panels", "inverter", "inverters", "meter", "meters"]
+  const BARCODE_REQUIRED_CATEGORIES = [
+    "panels",
+    "panel",
+    "solar panels",
+    "solar panel",
+    "inverter",
+    "inverters",
+    "meter",
+    "meters",
+  ]
   const isBarcodeRequiredForCategory = (category: string) => {
     const c = (category || "").toLowerCase().trim()
     return BARCODE_REQUIRED_CATEGORIES.includes(c)
@@ -351,12 +452,14 @@ export default function ProductModal({ product, onClose, onSave }: ProductModalP
         wattage: selectedProduct.wattage || prev.wattage,
         unit: unitDisplay,
       }))
+      applyPieceWeightFromRef(selectedProduct.name)
     } else {
       setFormData(prev => ({
         ...prev,
         name: productName,
         unit: refProduct?.unit ? (unitDisplayMap[refProduct.unit] || refProduct.unit) : "",
       }))
+      applyPieceWeightFromRef(productName)
     }
     setShowProductDropdown(false)
   }
@@ -733,27 +836,30 @@ export default function ProductModal({ product, onClose, onSave }: ProductModalP
     setLoading(true)
     
     try {
-      const quantity = formData.quantity || 0
-      
-      // Ensure category exists before creating product
       const categoryName = formData.category.trim()
       if (categoryName && !categories.includes(categoryName)) {
         try {
           await categoriesApi.create(categoryName)
-          // Refresh categories list
           const updatedCats = await categoriesApi.getAll()
           const sortedCategories = [...updatedCats].sort((a: any, b: any) => {
             const dateA = a.created_at ? new Date(a.created_at).getTime() : 0
             const dateB = b.created_at ? new Date(b.created_at).getTime() : 0
-            return dateB - dateA // Newest first
+            return dateB - dateA
           })
           setCategories(sortedCategories.map(c => c.label))
         } catch (catErr) {
-          // Category creation might fail if backend auto-creates categories
-          // or if category already exists. Continue with product creation.
           console.log("Category may already exist or will be auto-created:", catErr)
         }
       }
+
+      const qtyInput = formData.quantity || 0
+      const resolvedCreate = resolveInventoryForSave(qtyInput, "create")
+      if (resolvedCreate.error) {
+        setError(resolvedCreate.error)
+        setLoading(false)
+        return
+      }
+      const quantity = resolvedCreate.quantity
       
       // Prepare product data for creation
       const productData: any = {
@@ -762,7 +868,7 @@ export default function ProductModal({ product, onClose, onSave }: ProductModalP
         category: categoryName,
         wattage: formData.wattage || undefined,
         quantity: quantity,
-        unit: formData.unit,
+        unit: resolvedCreate.unit || formData.unit,
         image: imageFile || undefined,
       }
       
@@ -864,7 +970,7 @@ export default function ProductModal({ product, onClose, onSave }: ProductModalP
       onSave(createdWithSerials)
       onClose()
     } catch (err: any) {
-      setError(err.message || "Failed to create product")
+      setError(formatProductSaveError(err, "Failed to create product"))
     } finally {
       setLoading(false)
     }
@@ -906,35 +1012,50 @@ export default function ProductModal({ product, onClose, onSave }: ProductModalP
       // Note: Duplicate product validation is handled by the backend
       // Frontend no longer blocks submission - backend will return appropriate error if duplicate exists
       
-      // Calculate final quantity: if editing and stockToAdd > 0, add to existing; otherwise use formData.quantity
+      // Calculate final quantity (kg products: convert weight → rounded pieces, save as Pieces)
       let finalQuantity = formData.quantity || 0
+      let resolvedUnit: string | undefined
+      let stockToAddPieces = stockToAdd
+
       if (product?.id && stockToAdd > 0) {
-        // When editing: add new stock to existing stock
-        finalQuantity = existingStock + stockToAdd
-        
-        // Validate serial numbers if stock is being added (required for Panels, Inverters, Meter)
-        if (stockToAdd > 0 && isBarcodeRequiredForCategory(categoryName)) {
+        const resolvedAdd = resolveInventoryForSave(stockToAdd, "addStock")
+        if (resolvedAdd.error) {
+          setError(resolvedAdd.error)
+          setLoading(false)
+          return
+        }
+        stockToAddPieces = resolvedAdd.quantity
+        if (isKgProduct) {
+          resolvedUnit = resolvedAdd.unit
+        }
+        finalQuantity = existingStock + stockToAddPieces
+
+        if (stockToAddPieces > 0 && isBarcodeRequiredForCategory(categoryName)) {
           if (serialNumbers.length === 0 && !serialNumberExcelFile) {
             setError("Serial numbers are required for Panels, Inverters, and Meter categories. Please enter or scan serial numbers.")
             setLoading(false)
             return
           }
-          if (serialNumbers.length > 0 && serialNumbers.length !== stockToAdd && !serialNumberExcelFile) {
-            setError(`Please enter ${stockToAdd} serial numbers. Currently have ${serialNumbers.length}.`)
+          if (serialNumbers.length > 0 && serialNumbers.length !== stockToAddPieces && !serialNumberExcelFile) {
+            setError(`Please enter ${stockToAddPieces} serial numbers. Currently have ${serialNumbers.length}.`)
             setLoading(false)
             return
           }
-        } else if (stockToAdd > 0 && serialNumbers.length > 0 && serialNumbers.length !== stockToAdd && !serialNumberExcelFile) {
-          // Optional categories: if serial numbers provided, count must match
-          setError(`Please enter ${stockToAdd} serial numbers. Currently have ${serialNumbers.length}.`)
+        } else if (stockToAddPieces > 0 && serialNumbers.length > 0 && serialNumbers.length !== stockToAddPieces && !serialNumberExcelFile) {
+          setError(`Please enter ${stockToAddPieces} serial numbers. Currently have ${serialNumbers.length}.`)
           setLoading(false)
           return
         }
       } else if (!product?.id) {
-        // When creating new product: use the quantity from form
-        finalQuantity = formData.quantity || 0
+        const resolvedCreate = resolveInventoryForSave(formData.quantity || 0, "create")
+        if (resolvedCreate.error) {
+          setError(resolvedCreate.error)
+          setLoading(false)
+          return
+        }
+        finalQuantity = resolvedCreate.quantity
+        resolvedUnit = resolvedCreate.unit
       } else {
-        // When editing without adding stock: keep existing quantity
         finalQuantity = existingStock
       }
 
@@ -946,6 +1067,9 @@ export default function ProductModal({ product, onClose, onSave }: ProductModalP
         image: imageFile || undefined,
         quantity: finalQuantity,
       }
+      if (resolvedUnit) {
+        productData.unit = resolvedUnit
+      }
       
       // Add serial numbers if stock is being added (for editing existing products)
       if (product?.id && stockToAdd > 0) {
@@ -956,10 +1080,9 @@ export default function ProductModal({ product, onClose, onSave }: ProductModalP
           setLoading(false)
           return
         }
-        if (stockToAdd > existingStock && serialNumbers.length > 0) {
-          // Validate we have enough serials for the batch
-          if (serialNumbers.length !== stockToAdd) {
-            setError(`Please enter ${stockToAdd} serial numbers. Currently have ${serialNumbers.length}.`)
+        if (stockToAddPieces > existingStock && serialNumbers.length > 0) {
+          if (serialNumbers.length !== stockToAddPieces) {
+            setError(`Please enter ${stockToAddPieces} serial numbers. Currently have ${serialNumbers.length}.`)
             setLoading(false)
             return
           }
@@ -974,7 +1097,7 @@ export default function ProductModal({ product, onClose, onSave }: ProductModalP
             productData.default_price = defaultPrice
           }
         }
-        productData.stock_to_add = stockToAdd
+        productData.stock_to_add = stockToAddPieces
       }
       
       // Assign serial numbers to existing stock (Panels/Inverters/Meter: stock exists but no serials yet)
@@ -1096,15 +1219,32 @@ export default function ProductModal({ product, onClose, onSave }: ProductModalP
         onSave(updated)
         }
       } else {
-        // Create new product in Step 1, then attach serials/pricing in Step 2.
-        // This avoids permission issues on multipart create payloads in some backends.
+        // Create new product in Step 1, then attach serials/pricing in Step 2 — unless the backend
+        // rejects creates without serials for Panels / Inverters / Meter. Then open Step 2 first and
+        // create on Complete with serials (handleSerialNumbersSubmit fallback path).
+        const resolvedCreate = resolveInventoryForSave(formData.quantity || 0, "create")
+        if (resolvedCreate.error) {
+          setError(resolvedCreate.error)
+          setLoading(false)
+          return
+        }
+        const serialMandatoryCategory =
+          isBarcodeRequiredForCategory(categoryName) && resolvedCreate.quantity > 0
+
+        if (serialMandatoryCategory) {
+          setCreatedProductId(null)
+          setCurrentStep(2)
+          setLoading(false)
+          return
+        }
+
         const createData: any = {
           name: formData.name,
           model: formData.model,
           category: categoryName,
           wattage: formData.wattage || undefined,
-          quantity: formData.quantity || 0,
-          unit: formData.unit,
+          quantity: resolvedCreate.quantity,
+          unit: resolvedCreate.unit || formData.unit,
           image: imageFile || undefined,
           unit_price: formData.price && formData.price > 0 ? formData.price : 0,
         }
@@ -1117,7 +1257,7 @@ export default function ProductModal({ product, onClose, onSave }: ProductModalP
         setLoading(false)
       }
     } catch (err: any) {
-      setError(err.message || "Failed to save product")
+      setError(formatProductSaveError(err, "Failed to save product"))
     } finally {
       setLoading(false)
     }
@@ -1152,11 +1292,27 @@ export default function ProductModal({ product, onClose, onSave }: ProductModalP
           <div className="space-y-4">
             <div className="p-4 bg-blue-900/20 border border-blue-700 rounded-lg">
               <p className="text-sm text-blue-300">
-                Product details for <strong>{formData.name}</strong> are ready. 
-                {formData.quantity > 0 ? (
-                  <> Now add serial numbers for {formData.quantity} units.</>
+                {createdProductId ? (
+                  <>
+                    Product <strong>{formData.name}</strong> is saved.
+                    {formData.quantity > 0 ? (
+                      <> Add serial numbers for {formData.quantity} units, then click Complete.</>
+                    ) : (
+                      <> Click Complete to finish.</>
+                    )}
+                  </>
                 ) : (
-                  <> Click Complete to create the product.</>
+                  <>
+                    <strong>{formData.name}</strong>
+                    {formData.quantity > 0 ? (
+                      <>
+                        {": "}enter {formData.quantity} serial numbers below, then click <strong>Complete</strong> to
+                        create the product.
+                      </>
+                    ) : (
+                      <> — click Complete to create the product.</>
+                    )}
+                  </>
                 )}
               </p>
             </div>
@@ -1173,12 +1329,14 @@ export default function ProductModal({ product, onClose, onSave }: ProductModalP
                 </p>
                 <input
                   type="text"
-                  value={sellingPriceOverride || ""}
+                  inputMode="decimal"
+                  value={sellingPriceText}
                   onChange={(e) => {
-                    const value = e.target.value.replace(/[^\d.]/g, "")
-                    setSellingPriceOverride(value ? parseFloat(value) || 0 : 0)
+                    const value = sanitizeDecimalInput(e.target.value)
+                    setSellingPriceText(value)
+                    setSellingPriceOverride(parseDecimalInput(value))
                   }}
-                  placeholder="Enter selling price (optional)"
+                  placeholder="Enter selling price e.g. 85.45 (optional)"
                   className="w-full px-4 py-2 bg-slate-700 border border-slate-600 rounded-lg text-white placeholder-slate-500 focus:outline-none focus:border-emerald-500"
                 />
               </div>
@@ -1426,8 +1584,8 @@ Example: SN001, SN002, SN003"
                                   type="text"
                                   value={serialNumberPrices[sn] !== undefined && serialNumberPrices[sn] !== null ? serialNumberPrices[sn] : ""}
                                   onChange={(e) => {
-                                    const value = e.target.value.replace(/[^\d.]/g, "")
-                                    const numValue = value ? parseFloat(value) || 0 : 0
+                                    const value = sanitizeDecimalInput(e.target.value)
+                                    const numValue = parseDecimalInput(value)
                                     setSerialNumberPrices({ ...serialNumberPrices, [sn]: numValue })
                                   }}
                                   placeholder="Cost price"
@@ -1564,10 +1722,11 @@ Example: SN001, SN002, SN003"
                     </label>
                     <input
                       type="text"
-                      value={defaultPrice || ""}
+                      value={defaultPriceText}
                       onChange={(e) => {
-                        const value = e.target.value.replace(/[^\d.]/g, "")
-                        setDefaultPrice(value ? parseFloat(value) || 0 : 0)
+                        const value = sanitizeDecimalInput(e.target.value)
+                        setDefaultPriceText(value)
+                        setDefaultPrice(parseDecimalInput(value))
                       }}
                       placeholder="Enter cost price for all items"
                       className="w-full px-4 py-2 bg-slate-700 border border-slate-600 rounded-lg text-white placeholder-slate-500 focus:outline-none focus:border-blue-500"
@@ -1593,8 +1752,8 @@ Example: SN001, SN002, SN003"
                                   type="text"
                                   value={serialNumberPrices[sn] !== undefined && serialNumberPrices[sn] !== null ? serialNumberPrices[sn] : ""}
                                   onChange={(e) => {
-                                    const value = e.target.value.replace(/[^\d.]/g, "")
-                                    const numValue = value ? parseFloat(value) || 0 : 0
+                                    const value = sanitizeDecimalInput(e.target.value)
+                                    const numValue = parseDecimalInput(value)
                                     setSerialNumberPrices({
                                       ...serialNumberPrices,
                                       [sn]: numValue
@@ -1985,12 +2144,14 @@ Example: SN001, SN002, SN003"
                     <label className="block text-sm font-medium text-slate-300 mb-2">Selling Price (₹) – set for this product</label>
                     <input
                       type="text"
-                      value={sellingPriceOverride || ""}
+                      inputMode="decimal"
+                      value={sellingPriceText}
                       onChange={(e) => {
-                        const value = e.target.value.replace(/[^\d.]/g, "")
-                        setSellingPriceOverride(value ? parseFloat(value) || 0 : 0)
+                        const value = sanitizeDecimalInput(e.target.value)
+                        setSellingPriceText(value)
+                        setSellingPriceOverride(parseDecimalInput(value))
                       }}
-                      placeholder={useMaxCostForSelling ? "Override with manual price (or leave for max cost)" : "Enter selling price"}
+                      placeholder={useMaxCostForSelling ? "Override with manual price (or leave for max cost)" : "Enter selling price e.g. 85.45"}
                       className="w-full px-4 py-2 bg-slate-700 border border-slate-600 rounded-lg text-white placeholder-slate-500 focus:outline-none focus:border-emerald-500"
                     />
                     <p className="text-xs text-slate-500 mt-1">Separate from cost price. Used for quotations and sales.</p>
@@ -2000,41 +2161,72 @@ Example: SN001, SN002, SN003"
               
               <div>
                 <label className="block text-sm font-medium text-slate-300 mb-2">
-                  Add Stock
-                  <span className="text-xs text-slate-400 ml-2 font-normal">(New stock to add to existing)</span>
+                  {isKgProduct ? "Add Weight (kg)" : "Add Stock"}
+                  <span className="text-xs text-slate-400 ml-2 font-normal">
+                    {isKgProduct ? "(Converted to pieces on save)" : "(New stock to add to existing)"}
+                  </span>
                 </label>
                 <input
                   type="text"
-                  value={stockToAdd || ""}
+                  inputMode="decimal"
+                  value={stockToAddText}
                   onChange={(e) => {
-                    const value = e.target.value
-                    // Allow empty, numbers, and decimal points
-                    if (value === "" || /^\d*\.?\d*$/.test(value)) {
-                      const newStockToAdd = value === "" ? 0 : Number.parseFloat(value) || 0
-                      setStockToAdd(newStockToAdd)
-                      // Keep existing serial numbers when quantity changes – user may add more
-                      if (newStockToAdd === 0 && stockToAdd !== 0) {
-                        setSerialNumbers([])
-                        setSerialNumberInput("")
-                        setSerialNumberExcelFile(null)
-                        setIndividualPricing(false)
-                        setDefaultPrice(0)
-                        setSerialNumberPrices({})
-                        if (isScanning) {
-                          stopCameraScanning()
-                        }
+                    const value = sanitizeDecimalInput(e.target.value, 3)
+                    setStockToAddText(value)
+                    const newStockToAdd = parseDecimalInput(value)
+                    setStockToAdd(newStockToAdd)
+                    if (newStockToAdd === 0 && stockToAdd !== 0) {
+                      setSerialNumbers([])
+                      setSerialNumberInput("")
+                      setSerialNumberExcelFile(null)
+                      setIndividualPricing(false)
+                      setDefaultPrice(0)
+                      setDefaultPriceText("")
+                      setSerialNumberPrices({})
+                      if (isScanning) {
+                        stopCameraScanning()
                       }
                     }
                   }}
                   className="w-full px-4 py-2 bg-slate-700 border border-slate-600 rounded-lg text-white placeholder-slate-500 focus:outline-none focus:border-blue-500"
-                  placeholder="Enter quantity to add"
+                  placeholder={isKgProduct ? "Enter weight in kg e.g. 5.25" : "Enter quantity to add"}
                 />
-                {stockToAdd > 0 && (
+                {parseDecimalInput(stockToAddText) > 0 && isKgProduct && kgPreviewPieces(parseDecimalInput(stockToAddText)) != null && (
+                  <p className="text-xs text-emerald-400 mt-1">
+                    ≈ {kgPreviewPieces(parseDecimalInput(stockToAddText))} pieces (rounded) — saved as PCS. New total:{" "}
+                    {existingStock + (kgPreviewPieces(parseDecimalInput(stockToAddText)) || 0)} PCS
+                  </p>
+                )}
+                {parseDecimalInput(stockToAddText) > 0 && !isKgProduct && (
                   <p className="text-xs text-emerald-400 mt-1">
                     New total will be: {existingStock + stockToAdd} {formData.unit || ""}
                   </p>
                 )}
               </div>
+
+              {isKgProduct && product?.id && (
+                <div className="p-4 bg-amber-900/20 border border-amber-700/50 rounded-lg space-y-3">
+                  <p className="text-sm text-amber-200">
+                    Enter weight in kg above; stock is converted to whole pieces (PCS) when saved.
+                  </p>
+                  <div>
+                    <label className="block text-sm font-medium text-slate-300 mb-2">
+                      Weight per piece (kg) *
+                    </label>
+                    <input
+                      type="text"
+                      value={pieceWeightText}
+                      onChange={(e) => {
+                        const value = sanitizeDecimalInput(e.target.value, 3)
+                        setPieceWeightText(value)
+                        setPieceWeightKg(parseDecimalInput(value))
+                      }}
+                      placeholder="e.g. 0.45"
+                      className="w-full px-4 py-2 bg-slate-700 border border-slate-600 rounded-lg text-white placeholder-slate-500 focus:outline-none focus:border-amber-500"
+                    />
+                  </div>
+                </div>
+              )}
               
               {/* Serial Numbers Section - Only show when adding stock */}
               {stockToAdd > 0 && (
@@ -2277,9 +2469,8 @@ Example: SN001, SN002, SN003"
                                       type="text"
                                       value={serialNumberPrices[sn] !== undefined && serialNumberPrices[sn] !== null ? serialNumberPrices[sn] : ""}
                                       onChange={(e) => {
-                                        const value = e.target.value.replace(/[^\d.]/g, "")
-                                        const numValue = value ? parseFloat(value) || 0 : 0
-                                        setSerialNumberPrices({ ...serialNumberPrices, [sn]: numValue })
+                                        const value = sanitizeDecimalInput(e.target.value)
+                                        setSerialNumberPrices({ ...serialNumberPrices, [sn]: parseDecimalInput(value) })
                                       }}
                                       placeholder="Cost price"
                                       className="w-24 px-2 py-1.5 bg-slate-700 border border-slate-600 rounded text-white placeholder-slate-500 focus:outline-none focus:border-blue-500 text-sm"
@@ -2415,10 +2606,11 @@ Example: SN001, SN002, SN003"
                       </label>
                       <input
                         type="text"
-                        value={defaultPrice || ""}
+                        value={defaultPriceText}
                         onChange={(e) => {
-                          const value = e.target.value.replace(/[^\d.]/g, "")
-                          setDefaultPrice(value ? parseFloat(value) || 0 : 0)
+                          const value = sanitizeDecimalInput(e.target.value)
+                          setDefaultPriceText(value)
+                          setDefaultPrice(parseDecimalInput(value))
                         }}
                         placeholder="Enter cost price for all items"
                         className="w-full px-4 py-2 bg-slate-700 border border-slate-600 rounded-lg text-white placeholder-slate-500 focus:outline-none focus:border-blue-500"
@@ -2443,11 +2635,10 @@ Example: SN001, SN002, SN003"
                                     type="text"
                                     value={serialNumberPrices[sn] !== undefined && serialNumberPrices[sn] !== null ? serialNumberPrices[sn] : ""}
                                     onChange={(e) => {
-                                      const value = e.target.value.replace(/[^\d.]/g, "")
-                                      const numValue = value ? parseFloat(value) || 0 : 0
+                                      const value = sanitizeDecimalInput(e.target.value)
                                       setSerialNumberPrices({
                                         ...serialNumberPrices,
-                                        [sn]: numValue
+                                        [sn]: parseDecimalInput(value),
                                       })
                                     }}
                                     placeholder="Enter cost price"
@@ -2479,25 +2670,31 @@ Example: SN001, SN002, SN003"
             // Create mode: Show regular quantity and unit fields
             <div className="grid grid-cols-2 gap-3">
           <div>
-            <label className="block text-sm font-medium text-slate-300 mb-2">Quantity *</label>
+            <label className="block text-sm font-medium text-slate-300 mb-2">
+              {isKgProduct ? "Total Weight (kg) *" : "Quantity *"}
+            </label>
             <input
                   type="text"
               name="quantity"
-                  value={formData.quantity || ""}
+                  inputMode="decimal"
+                  value={quantityText}
                   onChange={(e) => {
-                    const value = e.target.value
-                    // Allow empty, numbers, and decimal points
-                    if (value === "" || /^\d*\.?\d*$/.test(value)) {
-                      setFormData(prev => ({
-                        ...prev,
-                        quantity: value === "" ? 0 : Number.parseFloat(value) || 0,
-                      }))
-                    }
+                    const value = sanitizeDecimalInput(e.target.value, 3)
+                    setQuantityText(value)
+                    setFormData(prev => ({
+                      ...prev,
+                      quantity: parseDecimalInput(value),
+                    }))
                   }}
               className="w-full px-4 py-2 bg-slate-700 border border-slate-600 rounded-lg text-white placeholder-slate-500 focus:outline-none focus:border-blue-500"
-                  placeholder="Enter quantity"
+                  placeholder={isKgProduct ? "Enter total weight in kg e.g. 10.5" : "Enter quantity"}
               required
             />
+            {isKgProduct && parseDecimalInput(quantityText) > 0 && kgPreviewPieces(parseDecimalInput(quantityText)) != null && (
+              <p className="text-xs text-emerald-400 mt-1">
+                ≈ {kgPreviewPieces(parseDecimalInput(quantityText))} pieces (rounded) — saved as PCS
+              </p>
+            )}
           </div>
               <div>
                 <label className="block text-sm font-medium text-slate-300 mb-2">Unit *</label>
@@ -2519,21 +2716,52 @@ Example: SN001, SN002, SN003"
             </div>
           )}
 
+          {isKgProduct && !product?.id && (
+            <div className="p-4 bg-amber-900/20 border border-amber-700/50 rounded-lg space-y-3">
+              <p className="text-sm text-amber-200">
+                This product is sold by weight. Enter total weight (kg) above; stock is saved as whole pieces (PCS).
+              </p>
+              <div>
+                <label className="block text-sm font-medium text-slate-300 mb-2">
+                  Weight per piece (kg) *
+                </label>
+                <input
+                  type="text"
+                  value={pieceWeightText}
+                  onChange={(e) => {
+                    const value = sanitizeDecimalInput(e.target.value, 3)
+                    setPieceWeightText(value)
+                    setPieceWeightKg(parseDecimalInput(value))
+                  }}
+                  placeholder="e.g. 0.45"
+                  className="w-full px-4 py-2 bg-slate-700 border border-slate-600 rounded-lg text-white placeholder-slate-500 focus:outline-none focus:border-amber-500"
+                />
+                {getRefProduct()?.weight_per_piece_kg ? (
+                  <p className="text-xs text-slate-400 mt-1">
+                    Pre-filled from product catalog — adjust if needed.
+                  </p>
+                ) : null}
+              </div>
+            </div>
+          )}
+
 
           <div>
             <label className="block text-sm font-medium text-slate-300 mb-2">Unit Price (₹)</label>
             <input
               type="text"
               name="price"
-              value={formData.price || ""}
+              inputMode="decimal"
+              value={priceText}
               onChange={(e) => {
-                const value = e.target.value.replace(/[^\d.]/g, "")
+                const value = sanitizeDecimalInput(e.target.value)
+                setPriceText(value)
                 setFormData(prev => ({
                   ...prev,
-                  price: value ? parseFloat(value) || 0 : 0
+                  price: parseDecimalInput(value),
                 }))
               }}
-              placeholder="Enter price (optional)"
+              placeholder="Enter price e.g. 85.45 (optional)"
               className="w-full px-4 py-2 bg-slate-700 border border-slate-600 rounded-lg text-white placeholder-slate-500 focus:outline-none focus:border-blue-500"
             />
             <p className="text-xs text-slate-400 mt-1">
@@ -2576,10 +2804,11 @@ Example: SN001, SN002, SN003"
                     </label>
                     <input
                       type="text"
-                      value={defaultPrice || ""}
+                      value={defaultPriceText}
                       onChange={(e) => {
-                        const value = e.target.value.replace(/[^\d.]/g, "")
-                        setDefaultPrice(value ? parseFloat(value) || 0 : 0)
+                        const value = sanitizeDecimalInput(e.target.value)
+                        setDefaultPriceText(value)
+                        setDefaultPrice(parseDecimalInput(value))
                       }}
                       placeholder="Enter cost price for all items"
                       className="w-full px-4 py-2 bg-slate-700 border border-slate-600 rounded-lg text-white placeholder-slate-500 focus:outline-none focus:border-blue-500"
@@ -2640,7 +2869,11 @@ Example: SN001, SN002, SN003"
                   Saving...
                 </>
               ) : (
-                product ? "Update Product" : "Create Product"
+                product
+                  ? "Update Product"
+                  : isBarcodeRequiredForCategory(formData.category.trim()) && (formData.quantity || 0) > 0
+                    ? "Continue — Serial numbers"
+                    : "Create Product"
               )}
             </Button>
           </div>

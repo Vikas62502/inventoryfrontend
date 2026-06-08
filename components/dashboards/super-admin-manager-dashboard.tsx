@@ -10,6 +10,7 @@ import ProductStockHistoryModal from "@/components/modals/product-stock-history-
 import AccountDashboard from "@/components/dashboards/account-dashboard"
 import { productsApi, categoriesApi } from "@/lib/api"
 import type { Product } from "@/lib/api"
+import { formatProductSaveError } from "@/lib/utils"
 
 interface SuperAdminManagerDashboardProps {
   userName: string
@@ -110,7 +111,7 @@ export default function SuperAdminManagerDashboard({ userName }: SuperAdminManag
       await loadProducts()
     } catch (err: any) {
       console.error("Failed to save product:", err)
-      const errorMessage = err?.message || err?.data?.error || "Failed to save product. Please try again."
+      const errorMessage = formatProductSaveError(err, "Failed to save product. Please try again.")
       setError(errorMessage)
       throw err // Re-throw so modal can handle it
     }
