@@ -84,12 +84,21 @@ Products in the reference catalog with `"unit": "KGS"` (e.g. Nut Bolt, J hook). 
 
 ### Frontend conversion formula
 
+**Quantity:**
 ```
 pieces = Math.round(total_weight_kg / weight_per_piece_kg)
 ```
 
-- If result is `0`, frontend blocks save (weight too low).
-- Decimals are **rounded** to nearest whole piece before API call.
+**Price (when unit is kg):**
+```
+price_per_piece = round(price_per_kg × weight_per_piece_kg, 2 decimals)
+```
+
+Example: **₹340/kg** × **0.45 kg/piece** → **₹153.00/piece** saved as `unit_price`.
+
+- User enters prices **per kg** in the form.
+- Backend receives **per-piece** prices only (same as quantity in pieces).
+- If result is `0` pieces, frontend blocks save (weight too low).
 
 ### What the backend receives
 
@@ -104,11 +113,13 @@ User enters **10.5 kg** total weight; piece weight **0.45 kg** → **23 pieces**
   "category": "Structural Components",
   "quantity": 23,
   "unit": "Pieces",
-  "unit_price": 340.00
+  "unit_price": 153.00
 }
 ```
 
-**Not sent:** `total_weight_kg`, `weight_per_piece_kg` (conversion is client-side only today).
+(User entered **340 ₹/kg** × **0.45 kg/piece** → **153 ₹/piece** saved.)
+
+**Not sent:** `total_weight_kg`, `weight_per_piece_kg`, `price_per_kg` (conversion is client-side only today).
 
 #### Add stock (`PUT /api/products/:id`)
 
@@ -261,7 +272,7 @@ Expose `weight_per_piece_kg` from backend catalog instead of static JSON — fro
 | Topic | Action |
 |-------|--------|
 | Prices | Use `DECIMAL(10,2)`; allow `85.45` |
-| Kg products | Frontend sends **pieces** + `unit: "Pieces"`; backend stores as-is |
+| Kg products | Frontend sends **pieces** + **per-piece prices** + `unit: "Pieces"`; backend stores as-is |
 | Unit validation | Allow display names; allow Pieces for ex-KGS catalog items |
 | Conversion | Done on frontend — backend does **not** need kg math unless you add audit columns |
 | Validation 400 fix | Stop requiring catalog unit KGS when inventory is stored in pieces |

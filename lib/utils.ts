@@ -100,6 +100,18 @@ export function convertKgWeightToPieces(totalKg: number, pieceWeightKg: number):
   return Math.round(totalKg / pieceWeightKg)
 }
 
+/** Price per kg × weight per piece → price per piece (2 decimal places). */
+export function convertKgPriceToPiecePrice(pricePerKg: number, pieceWeightKg: number): number {
+  if (pricePerKg <= 0 || pieceWeightKg <= 0) return 0
+  return Math.round(pricePerKg * pieceWeightKg * 100) / 100
+}
+
+/** Stored piece price → display as price per kg (2 decimal places). */
+export function convertPiecePriceToKgPrice(piecePrice: number, pieceWeightKg: number): number {
+  if (piecePrice <= 0 || pieceWeightKg <= 0) return 0
+  return Math.round((piecePrice / pieceWeightKg) * 100) / 100
+}
+
 export const UNIT_DISPLAY_TO_API: Record<string, string> = {
   Quantity: "NOS",
   Pieces: "PCS",

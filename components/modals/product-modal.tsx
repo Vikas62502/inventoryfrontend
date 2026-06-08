@@ -10,7 +10,15 @@ import { productsApi, categoriesApi, serialNumbersApi, type SerialNumber } from 
 import type { Product } from "@/lib/api"
 import { authService } from "@/lib/auth"
 import { extractSerialNumbersFromFile } from "@/lib/parse-excel-serials"
-import { formatProductSaveError, sanitizeDecimalInput, parseDecimalInput, isKilogramUnit, convertKgWeightToPieces } from "@/lib/utils"
+import {
+  formatProductSaveError,
+  sanitizeDecimalInput,
+  parseDecimalInput,
+  isKilogramUnit,
+  convertKgWeightToPieces,
+  convertKgPriceToPiecePrice,
+  convertPiecePriceToKgPrice,
+} from "@/lib/utils"
 
 interface ProductModalProps {
   product?: Product | null
@@ -158,14 +166,45 @@ export default function ProductModal({ product, onClose, onSave }: ProductModalP
     return { quantity: pieces, unit: unitDisplayMap.PCS }
   }
 
-  const kgPreviewPieces = (weightKg: number) => {
+  const getEffectivePieceWeightKg = (): number => {
     const refWeight = getRefProduct()?.weight_per_piece_kg
-    const pieceWeight =
+    return (
       parseDecimalInput(pieceWeightText) ||
       pieceWeightKg ||
       (typeof refWeight === "number" ? refWeight : 0)
+    )
+  }
+
+  const kgPreviewPieces = (weightKg: number) => {
+    const pieceWeight = getEffectivePieceWeightKg()
     if (pieceWeight <= 0 || weightKg <= 0) return null
     return convertKgWeightToPieces(weightKg, pieceWeight)
+  }
+
+  const kgPreviewPiecePrice = (pricePerKg: number) => {
+    const pieceWeight = getEffectivePieceWeightKg()
+    if (pieceWeight <= 0 || pricePerKg <= 0) return null
+    return convertKgPriceToPiecePrice(pricePerKg, pieceWeight)
+  }
+
+  /** User enters ₹/kg for kg products; API stores ₹/piece. */
+  const toPiecePrice = (enteredPrice: number): number => {
+    if (!isKgProduct || enteredPrice <= 0) return enteredPrice
+    const w = getEffectivePieceWeightKg()
+    return w > 0 ? convertKgPriceToPiecePrice(enteredPrice, w) : enteredPrice
+  }
+
+  const validateKgPriceInputs = (): string | null => {
+    if (!isKgProduct) return null
+    const hasPrice =
+      formData.price > 0 ||
+      defaultPrice > 0 ||
+      sellingPriceOverride > 0 ||
+      Object.values(serialNumberPrices).some((p) => p > 0)
+    if (hasPrice && getEffectivePieceWeightKg() <= 0) {
+      return "Enter weight per piece (kg) to convert price from per kg to per piece."
+    }
+    return null
   }
   
   // Camera barcode scanning
@@ -274,11 +313,27 @@ export default function ProductModal({ product, onClose, onSave }: ProductModalP
       setDefaultPrice(0) // Reset default price
       setSerialNumberPrices({}) // Reset individual prices
       setUseMaxCostForSelling(true) // Reset selling price mode
-      const initialSelling = (product.selling_price ?? product.unit_price ?? product.price ?? 0) || 0
-      setSellingPriceOverride(initialSelling)
-      setSellingPriceText(initialSelling > 0 ? String(initialSelling) : "")
-      const initialPrice = product.unit_price || product.price || 0
-      setPriceText(initialPrice > 0 ? String(initialPrice) : "")
+      const refForPrice = referenceData.find((item: any) => item.name === product.name)
+      const pwForPrice =
+        typeof refForPrice?.weight_per_piece_kg === "number" ? refForPrice.weight_per_piece_kg : 0
+      const productIsKg =
+        isKilogramUnit(refForPrice?.unit) || isKilogramUnit(product.unit as string | undefined)
+
+      const storedUnitPrice = product.unit_price || product.price || 0
+      const displayUnitPrice =
+        productIsKg && pwForPrice > 0 && storedUnitPrice > 0
+          ? convertPiecePriceToKgPrice(storedUnitPrice, pwForPrice)
+          : storedUnitPrice
+      setPriceText(displayUnitPrice > 0 ? String(displayUnitPrice) : "")
+      setFormData((prev) => ({ ...prev, price: displayUnitPrice }))
+
+      const storedSelling = (product.selling_price ?? 0) || 0
+      const displaySelling =
+        productIsKg && pwForPrice > 0 && storedSelling > 0
+          ? convertPiecePriceToKgPrice(storedSelling, pwForPrice)
+          : storedSelling
+      setSellingPriceOverride(displaySelling)
+      setSellingPriceText(displaySelling > 0 ? String(displaySelling) : "")
       setQuantityText(currentStock > 0 ? String(currentStock) : "")
       setDefaultPriceText("")
       setDefaultPrice(0)
@@ -860,6 +915,13 @@ export default function ProductModal({ product, onClose, onSave }: ProductModalP
         return
       }
       const quantity = resolvedCreate.quantity
+
+      const kgPriceErr = validateKgPriceInputs()
+      if (kgPriceErr) {
+        setError(kgPriceErr)
+        setLoading(false)
+        return
+      }
       
       // Prepare product data for creation
       const productData: any = {
@@ -872,9 +934,9 @@ export default function ProductModal({ product, onClose, onSave }: ProductModalP
         image: imageFile || undefined,
       }
       
-      // Include price if provided
+      // Include price if provided (kg products: user enters ₹/kg → save ₹/piece)
       if (formData.price && formData.price > 0) {
-        productData.unit_price = formData.price
+        productData.unit_price = toPiecePrice(formData.price)
       } else {
         productData.unit_price = 0
       }
@@ -914,18 +976,18 @@ export default function ProductModal({ product, onClose, onSave }: ProductModalP
         // Add pricing data (cost price for each serial number)
         if (serialNumbers.length > 0) {
           if (individualPricing) {
-            // Individual prices for each serial number
-            productData.serial_number_prices = serialNumberPrices
-          } else {
-            // Single price for all serial numbers (cost price)
-            productData.default_price = defaultPrice
+            productData.serial_number_prices = Object.fromEntries(
+              Object.entries(serialNumberPrices).map(([sn, p]) => [sn, toPiecePrice(p)])
+            )
+          } else if (defaultPrice > 0) {
+            productData.default_price = toPiecePrice(defaultPrice)
           }
         }
       }
 
       // Super Admin: include selling price when creating
       if (isSuperAdmin && sellingPriceOverride > 0) {
-        productData.selling_price = sellingPriceOverride
+        productData.selling_price = toPiecePrice(sellingPriceOverride)
       }
       
       // Step 2 behavior:
@@ -942,14 +1004,16 @@ export default function ProductModal({ product, onClose, onSave }: ProductModalP
           updateData.product_name = formData.name
           updateData.product_category = categoryName
           if (individualPricing) {
-            updateData.serial_number_prices = serialNumberPrices
-          } else {
-            updateData.default_price = defaultPrice
+            updateData.serial_number_prices = Object.fromEntries(
+              Object.entries(serialNumberPrices).map(([sn, p]) => [sn, toPiecePrice(p)])
+            )
+          } else if (defaultPrice > 0) {
+            updateData.default_price = toPiecePrice(defaultPrice)
           }
         }
         if (isSuperAdmin && sellingPriceOverride > 0) {
           updateData.use_max_cost_price = false
-          updateData.selling_price = sellingPriceOverride
+          updateData.selling_price = toPiecePrice(sellingPriceOverride)
         }
 
         if (Object.keys(updateData).length > 0) {
@@ -1059,6 +1123,13 @@ export default function ProductModal({ product, onClose, onSave }: ProductModalP
         finalQuantity = existingStock
       }
 
+      const kgPriceErr = validateKgPriceInputs()
+      if (kgPriceErr) {
+        setError(kgPriceErr)
+        setLoading(false)
+        return
+      }
+
       const productData: any = {
         name: formData.name,
         model: formData.model,
@@ -1092,9 +1163,11 @@ export default function ProductModal({ product, onClose, onSave }: ProductModalP
           productData.product_name = formData.name
           productData.product_category = categoryName
           if (individualPricing) {
-            productData.serial_number_prices = serialNumberPrices
-          } else {
-            productData.default_price = defaultPrice
+            productData.serial_number_prices = Object.fromEntries(
+              Object.entries(serialNumberPrices).map(([sn, p]) => [sn, toPiecePrice(p)])
+            )
+          } else if (defaultPrice > 0) {
+            productData.default_price = toPiecePrice(defaultPrice)
           }
         }
         productData.stock_to_add = stockToAddPieces
@@ -1111,24 +1184,25 @@ export default function ProductModal({ product, onClose, onSave }: ProductModalP
         productData.product_name = formData.name
         productData.product_category = categoryName
         productData.stock_to_add = 0
-        productData.default_price = defaultPrice || product?.unit_price || product?.price || 0
+        productData.default_price =
+          defaultPrice > 0
+            ? toPiecePrice(defaultPrice)
+            : product?.unit_price || product?.price || 0
       }
       
-      // Include price if provided (for all users)
-      // unit_price = cost price (same concept). selling_price = separate field set by Super Admin.
+      // Include price if provided (kg products: user enters ₹/kg → save ₹/piece)
       if (isSuperAdmin && product?.id) {
-        // Super Admin: selling_price + optional cost (Unit Price field)
         if (sellingPriceOverride > 0) {
           productData.use_max_cost_price = false
-          productData.selling_price = sellingPriceOverride
+          productData.selling_price = toPiecePrice(sellingPriceOverride)
         } else {
           productData.use_max_cost_price = useMaxCostForSelling
         }
         if (formData.price > 0) {
-          productData.unit_price = formData.price
+          productData.unit_price = toPiecePrice(formData.price)
         }
       } else if (formData.price && formData.price > 0) {
-        productData.unit_price = formData.price
+        productData.unit_price = toPiecePrice(formData.price)
       } else if (product) {
         // For editing, keep existing unit_price (cost price) if product exists
         productData.unit_price = product.unit_price || product.price || 0
@@ -1238,6 +1312,13 @@ export default function ProductModal({ product, onClose, onSave }: ProductModalP
           return
         }
 
+        const kgPriceErrCreate = validateKgPriceInputs()
+        if (kgPriceErrCreate) {
+          setError(kgPriceErrCreate)
+          setLoading(false)
+          return
+        }
+
         const createData: any = {
           name: formData.name,
           model: formData.model,
@@ -1246,10 +1327,11 @@ export default function ProductModal({ product, onClose, onSave }: ProductModalP
           quantity: resolvedCreate.quantity,
           unit: resolvedCreate.unit || formData.unit,
           image: imageFile || undefined,
-          unit_price: formData.price && formData.price > 0 ? formData.price : 0,
+          unit_price:
+            formData.price && formData.price > 0 ? toPiecePrice(formData.price) : 0,
         }
         if (isSuperAdmin && sellingPriceOverride > 0) {
-          createData.selling_price = sellingPriceOverride
+          createData.selling_price = toPiecePrice(sellingPriceOverride)
         }
         const created = await productsApi.create(createData)
         setCreatedProductId(created.id)
@@ -1322,7 +1404,9 @@ export default function ProductModal({ product, onClose, onSave }: ProductModalP
               <div className="p-4 bg-emerald-900/20 border border-emerald-600/50 rounded-lg space-y-3">
                 <div className="flex items-center gap-2">
                   <DollarSign className="w-5 h-5 text-emerald-500" />
-                  <label className="text-sm font-medium text-slate-300">Selling Price (₹)</label>
+                  <label className="text-sm font-medium text-slate-300">
+                    {isKgProduct ? "Selling Price (₹ per kg)" : "Selling Price (₹)"}
+                  </label>
                 </div>
                 <p className="text-xs text-slate-400">
                   Set the selling price for quotations and sales. Optional – can be set later from Set Selling Price tab.
@@ -1336,7 +1420,7 @@ export default function ProductModal({ product, onClose, onSave }: ProductModalP
                     setSellingPriceText(value)
                     setSellingPriceOverride(parseDecimalInput(value))
                   }}
-                  placeholder="Enter selling price e.g. 85.45 (optional)"
+                  placeholder={isKgProduct ? "Enter selling price per kg e.g. 400.00 (optional)" : "Enter selling price e.g. 85.45 (optional)"}
                   className="w-full px-4 py-2 bg-slate-700 border border-slate-600 rounded-lg text-white placeholder-slate-500 focus:outline-none focus:border-emerald-500"
                 />
               </div>
@@ -1718,7 +1802,7 @@ Example: SN001, SN002, SN003"
                   // Same cost price for all serial numbers (default)
                   <div>
                     <label className="block text-sm font-medium text-slate-300 mb-2">
-                      Cost Price (₹) – same for all {formData.quantity} items *
+                      {isKgProduct ? "Cost Price (₹ per kg)" : "Cost Price (₹)"} – same for all {formData.quantity} items *
                     </label>
                     <input
                       type="text"
@@ -1728,7 +1812,7 @@ Example: SN001, SN002, SN003"
                         setDefaultPriceText(value)
                         setDefaultPrice(parseDecimalInput(value))
                       }}
-                      placeholder="Enter cost price for all items"
+                      placeholder={isKgProduct ? "Enter cost price per kg" : "Enter cost price for all items"}
                       className="w-full px-4 py-2 bg-slate-700 border border-slate-600 rounded-lg text-white placeholder-slate-500 focus:outline-none focus:border-blue-500"
                     />
                     <p className="text-xs text-slate-400 mt-1">
@@ -2118,7 +2202,9 @@ Example: SN001, SN002, SN003"
                 <div className="p-4 bg-emerald-900/20 border border-emerald-600/50 rounded-lg space-y-3">
                   <div className="flex items-center gap-2">
                     <DollarSign className="w-5 h-5 text-emerald-500" />
-                    <label className="text-sm font-medium text-slate-300">Selling Price (₹)</label>
+                    <label className="text-sm font-medium text-slate-300">
+                    {isKgProduct ? "Selling Price (₹ per kg)" : "Selling Price (₹)"}
+                  </label>
                   </div>
                   <p className="text-xs text-slate-400">
                     Applies to product: <span className="text-white font-medium">{product?.name}</span>
@@ -2207,7 +2293,7 @@ Example: SN001, SN002, SN003"
               {isKgProduct && product?.id && (
                 <div className="p-4 bg-amber-900/20 border border-amber-700/50 rounded-lg space-y-3">
                   <p className="text-sm text-amber-200">
-                    Enter weight in kg above; stock is converted to whole pieces (PCS) when saved.
+                    Enter weight in kg above; stock is converted to whole pieces (PCS) when saved. Prices entered per kg are converted to per-piece price.
                   </p>
                   <div>
                     <label className="block text-sm font-medium text-slate-300 mb-2">
@@ -2602,7 +2688,7 @@ Example: SN001, SN002, SN003"
                   !individualPricing ? (
                     <div>
                       <label className="block text-sm font-medium text-slate-300 mb-2">
-                        Cost Price (₹) – same for all {stockToAdd} items *
+                        {isKgProduct ? "Cost Price (₹ per kg)" : "Cost Price (₹)"} – same for all {stockToAdd} items *
                       </label>
                       <input
                         type="text"
@@ -2612,7 +2698,7 @@ Example: SN001, SN002, SN003"
                           setDefaultPriceText(value)
                           setDefaultPrice(parseDecimalInput(value))
                         }}
-                        placeholder="Enter cost price for all items"
+                        placeholder={isKgProduct ? "Enter cost price per kg" : "Enter cost price for all items"}
                         className="w-full px-4 py-2 bg-slate-700 border border-slate-600 rounded-lg text-white placeholder-slate-500 focus:outline-none focus:border-blue-500"
                       />
                       <p className="text-xs text-slate-400 mt-1">
@@ -2719,7 +2805,7 @@ Example: SN001, SN002, SN003"
           {isKgProduct && !product?.id && (
             <div className="p-4 bg-amber-900/20 border border-amber-700/50 rounded-lg space-y-3">
               <p className="text-sm text-amber-200">
-                This product is sold by weight. Enter total weight (kg) above; stock is saved as whole pieces (PCS).
+                This product is sold by weight. Enter total weight (kg) and price per kg above; stock and prices are saved as whole pieces (PCS) and per-piece price.
               </p>
               <div>
                 <label className="block text-sm font-medium text-slate-300 mb-2">
@@ -2747,7 +2833,9 @@ Example: SN001, SN002, SN003"
 
 
           <div>
-            <label className="block text-sm font-medium text-slate-300 mb-2">Unit Price (₹)</label>
+            <label className="block text-sm font-medium text-slate-300 mb-2">
+              {isKgProduct ? "Unit Price (₹ per kg)" : "Unit Price (₹)"}
+            </label>
             <input
               type="text"
               name="price"
@@ -2761,11 +2849,22 @@ Example: SN001, SN002, SN003"
                   price: parseDecimalInput(value),
                 }))
               }}
-              placeholder="Enter price e.g. 85.45 (optional)"
+              placeholder={isKgProduct ? "Enter price per kg e.g. 340.00" : "Enter price e.g. 85.45 (optional)"}
               className="w-full px-4 py-2 bg-slate-700 border border-slate-600 rounded-lg text-white placeholder-slate-500 focus:outline-none focus:border-blue-500"
             />
+            {isKgProduct && parseDecimalInput(priceText) > 0 && kgPreviewPiecePrice(parseDecimalInput(priceText)) != null && (
+              <p className="text-xs text-emerald-400 mt-1">
+                ≈ ₹{kgPreviewPiecePrice(parseDecimalInput(priceText))!.toFixed(2)} per piece (saved as piece price)
+              </p>
+            )}
             <p className="text-xs text-slate-400 mt-1">
-              {isAgent ? "Required for agents" : isSuperAdmin && product?.id ? "Cost price – separate from Selling Price above" : "Optional - can be set later or when adding serial numbers"}
+              {isKgProduct
+                ? "Enter cost per kg — converted to per-piece price on save."
+                : isAgent
+                  ? "Required for agents"
+                  : isSuperAdmin && product?.id
+                    ? "Cost price – separate from Selling Price above"
+                    : "Optional - can be set later or when adding serial numbers"}
             </p>
           </div>
 
@@ -2800,7 +2899,7 @@ Example: SN001, SN002, SN003"
                 !individualPricing ? (
                   <div>
                     <label className="block text-sm font-medium text-slate-300 mb-2">
-                      Cost Price (₹) – same for all {formData.quantity} items *
+                      {isKgProduct ? "Cost Price (₹ per kg)" : "Cost Price (₹)"} – same for all {formData.quantity} items *
                     </label>
                     <input
                       type="text"
@@ -2810,7 +2909,7 @@ Example: SN001, SN002, SN003"
                         setDefaultPriceText(value)
                         setDefaultPrice(parseDecimalInput(value))
                       }}
-                      placeholder="Enter cost price for all items"
+                      placeholder={isKgProduct ? "Enter cost price per kg" : "Enter cost price for all items"}
                       className="w-full px-4 py-2 bg-slate-700 border border-slate-600 rounded-lg text-white placeholder-slate-500 focus:outline-none focus:border-blue-500"
                     />
                     <p className="text-xs text-slate-400 mt-1">
