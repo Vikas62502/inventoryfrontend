@@ -714,7 +714,13 @@ export default function SuperAdminDashboard({ userName }: SuperAdminDashboardPro
                             <p className="text-slate-400 text-xs mb-0.5">Quantity</p>
                             <p className={`font-semibold text-sm sm:text-base ${(product.quantity || 0) < 50 ? "text-red-400" : "text-cyan-400"}`}>
                               {product.quantity || 0}
-                              {referenceUnitsByName[product.name] ? ` ${referenceUnitsByName[product.name]}` : ""}
+                              {(() => {
+                                const u =
+                                  product.unit ||
+                                  referenceUnitsByName[product.name] ||
+                                  ""
+                                return u ? ` ${u}` : ""
+                              })()}
                             </p>
                           </div>
                         </div>

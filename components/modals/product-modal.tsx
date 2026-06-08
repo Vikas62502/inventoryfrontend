@@ -18,6 +18,7 @@ import {
   convertKgWeightToPieces,
   convertKgPriceToPiecePrice,
   convertPiecePriceToKgPrice,
+  unitToFormSelectValue,
 } from "@/lib/utils"
 
 interface ProductModalProps {
@@ -83,7 +84,7 @@ export default function ProductModal({ product, onClose, onSave }: ProductModalP
     price: product?.price || product?.unit_price || 0,
     quantity: product?.quantity || product?.central_stock || 0,
     category: product?.category || "",
-    unit: "",
+    unit: product?.unit ? unitToFormSelectValue(product.unit) : "",
     image: product?.image || "",
   })
   
@@ -193,6 +194,11 @@ export default function ProductModal({ product, onClose, onSave }: ProductModalP
     const w = getEffectivePieceWeightKg()
     return w > 0 ? convertKgPriceToPiecePrice(enteredPrice, w) : enteredPrice
   }
+
+  const attachUnitToProduct = (saved: Product, payloadUnit?: string): Product => ({
+    ...saved,
+    unit: saved.unit || payloadUnit || formData.unit?.trim() || undefined,
+  })
 
   const validateKgPriceInputs = (): string | null => {
     if (!isKgProduct) return null
@@ -397,14 +403,19 @@ export default function ProductModal({ product, onClose, onSave }: ProductModalP
     }
     if (product?.name && referenceData.length > 0) {
       const refProduct = referenceData.find((item: any) => item.name === product.name)
-      if (refProduct && refProduct.unit) {
-        const unitDisplay = unitDisplayMap[refProduct.unit] || refProduct.unit
-        setFormData(prev => ({
-          ...prev,
-          unit: unitDisplay,
-        }))
-        applyPieceWeightFromRef(product.name)
-      }
+      const unitFromApi = unitToFormSelectValue(product.unit)
+      const unitFromRef =
+        refProduct?.unit ? unitDisplayMap[refProduct.unit] || refProduct.unit : ""
+      setFormData((prev) => ({
+        ...prev,
+        unit: unitFromApi || unitFromRef || prev.unit,
+      }))
+      if (refProduct) applyPieceWeightFromRef(product.name)
+    } else if (product?.unit) {
+      setFormData((prev) => ({
+        ...prev,
+        unit: unitToFormSelectValue(product.unit) || prev.unit,
+      }))
     }
   }, [product, referenceData])
 
@@ -1026,9 +1037,12 @@ export default function ProductModal({ product, onClose, onSave }: ProductModalP
       }
       
       // Ensure serial_numbers are on the created/updated product (for View All fallback if backend doesn't return them)
-      const createdWithSerials = serialNumbers.length > 0
-        ? { ...created, serial_numbers: created.serial_numbers ?? serialNumbers }
-        : created
+      const createdWithSerials = attachUnitToProduct(
+        serialNumbers.length > 0
+          ? { ...created, serial_numbers: created.serial_numbers ?? serialNumbers }
+          : created,
+        productData.unit
+      )
       
       // Product created successfully - show in catalog
       onSave(createdWithSerials)
@@ -1140,6 +1154,8 @@ export default function ProductModal({ product, onClose, onSave }: ProductModalP
       }
       if (resolvedUnit) {
         productData.unit = resolvedUnit
+      } else if (formData.unit?.trim()) {
+        productData.unit = formData.unit.trim()
       }
       
       // Add serial numbers if stock is being added (for editing existing products)
@@ -1283,14 +1299,17 @@ export default function ProductModal({ product, onClose, onSave }: ProductModalP
               ? serialsSent
               : [...assignedSerialNumbers.map((s) => s.serial_number), ...serialsSent]
             : (updated as any).serial_numbers
-          const updatedWithSerials = fullSerials?.length
-            ? { ...updated, serial_numbers: (updated as any).serial_numbers ?? fullSerials }
-            : updated
+          const updatedWithSerials = attachUnitToProduct(
+            fullSerials?.length
+              ? { ...updated, serial_numbers: (updated as any).serial_numbers ?? fullSerials }
+              : updated,
+            productData.unit
+          )
           onSave(updatedWithSerials)
         } else {
           // Regular update without files
         const updated = await productsApi.update(product.id, productData)
-        onSave(updated)
+        onSave(attachUnitToProduct(updated, productData.unit))
         }
       } else {
         // Create new product in Step 1, then attach serials/pricing in Step 2 — unless the backend
@@ -2128,6 +2147,11 @@ Example: SN001, SN002, SN003"
                       </option>
                     ))}
                   </select>
+                  {!formData.unit ? (
+                    <p className="text-xs text-amber-400 mt-1">
+                      Select a unit — it will show next to stock in the catalog.
+                    </p>
+                  ) : null}
                 </div>
               </div>
               

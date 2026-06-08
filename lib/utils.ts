@@ -127,6 +127,39 @@ export function resolveApiUnit(displayUnit: string): string {
   return UNIT_DISPLAY_TO_API[displayUnit] || displayUnit
 }
 
+/** Short label for stock column (NOS, PCS, MTR, …). */
+export function formatProductUnitLabel(unit?: string | null): string {
+  if (!unit?.trim()) return ""
+  const u = unit.trim()
+  const fromDisplay: Record<string, string> = {
+    Quantity: "NOS",
+    Pieces: "PCS",
+    Meters: "MTR",
+    Kilograms: "KGS",
+    Watts: "W",
+    Pack: "PAC",
+  }
+  return fromDisplay[u] || u
+}
+
+/** Map API/catalog unit to form select value (Quantity, Pieces, …). */
+export function unitToFormSelectValue(unit?: string | null): string {
+  if (!unit?.trim()) return ""
+  const u = unit.trim()
+  if (UNIT_DISPLAY_TO_API[u]) return u
+  const fromCode: Record<string, string> = {
+    NOS: "Quantity",
+    PCS: "Pieces",
+    MTR: "Meters",
+    KGS: "Kilograms",
+    W: "Watts",
+    PAC: "Pack",
+    Fixed: "Fixed",
+    Pillar: "Pillar",
+  }
+  return fromCode[u] || u
+}
+
 /** Normalize API errors for product save UI (AWS/S3 misconfig, nested payloads). */
 export function formatProductSaveError(err: unknown, fallback: string): string {
   const chunks: string[] = []

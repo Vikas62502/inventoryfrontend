@@ -10,7 +10,7 @@ import ProductStockHistoryModal from "@/components/modals/product-stock-history-
 import AccountDashboard from "@/components/dashboards/account-dashboard"
 import { productsApi, categoriesApi } from "@/lib/api"
 import type { Product } from "@/lib/api"
-import { formatProductSaveError } from "@/lib/utils"
+import { formatProductSaveError, formatProductUnitLabel } from "@/lib/utils"
 
 interface SuperAdminManagerDashboardProps {
   userName: string
@@ -145,7 +145,8 @@ export default function SuperAdminManagerDashboard({ userName }: SuperAdminManag
 
   // Use quantity or central_stock (API might return either)
   const getProductStock = (p: Product) => p.quantity ?? p.central_stock ?? p.total_stock ?? 0
-  const getProductUnit = (p: Product) => referenceUnitsByName[p.name] || ""
+  const getProductUnit = (p: Product) =>
+    formatProductUnitLabel(p.unit) || formatProductUnitLabel(referenceUnitsByName[p.name]) || ""
   const totalStock = products.reduce((sum, p) => sum + getProductStock(p), 0)
   const lowStockCount = products.filter(p => getProductStock(p) < 10).length
 

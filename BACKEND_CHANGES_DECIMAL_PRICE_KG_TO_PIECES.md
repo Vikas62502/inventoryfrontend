@@ -254,6 +254,11 @@ Expose `weight_per_piece_kg` from backend catalog instead of static JSON — fro
 
 - [ ] Return `unit_price`, `selling_price` as decimals (not truncated integers).
 - [ ] Return stored `unit` (e.g. `"Pieces"`) after kg product is saved.
+- [ ] **Persist and return `unit`** on every product — including manually typed product names (not only catalog items). Frontend displays stock as `{quantity} {unit}`.
+
+```sql
+ALTER TABLE products ADD COLUMN IF NOT EXISTS unit VARCHAR(50);
+```
 
 ---
 
@@ -264,18 +269,43 @@ Expose `weight_per_piece_kg` from backend catalog instead of static JSON — fro
 3. **Kg add stock** — PUT with `stock_to_add: 11`, `unit: "Pieces"`; quantity increases by 11, not by 11 kg.
 4. **Unit codes** — Accept both `"Pieces"` and `"PCS"` if sent.
 5. **No false validation** — Updating product name/price without `unit` in body must not fail on unit mismatch.
+6. **Manual product unit** — POST with custom name + `"unit": "Meters"`; GET list returns `unit` for catalog display.
+7. **Edit unit** — PUT with only `"unit": "Quantity"` updates unit without 400 error.
 
 ---
 
-## 8. Summary for Backend Team
+## 8. Product `unit` Column (Required — Catalog Display)
+
+Frontend sends `unit` on **create** and **update** for all products (including manually typed names).
+
+| Request | Example `unit` values |
+|---------|------------------------|
+| POST /api/products | `"Meters"`, `"Quantity"`, `"Pieces"`, `"Kilograms"` |
+| PUT /api/products/:id | Same — user can set/fix unit when editing |
+
+**Database:**
+```sql
+ALTER TABLE products ADD COLUMN IF NOT EXISTS unit VARCHAR(50);
+```
+
+**GET responses** must include `unit` so the catalog shows stock as `900 MTR`, `69 NOS`, etc.
+
+- Accept display names **and** codes (`Pieces` / `PCS`, `Quantity` / `NOS`, …).
+- Do **not** require unit to match a static catalog — user may type a custom product name.
+
+---
+
+## 9. Summary for Backend Team
 
 | Topic | Action |
 |-------|--------|
-| Prices | Use `DECIMAL(10,2)`; allow `85.45` |
+| Prices | Use `DECIMAL(10,2)`; allow `85.45` and `153.00` |
 | Kg products | Frontend sends **pieces** + **per-piece prices** + `unit: "Pieces"`; backend stores as-is |
+| Product `unit` | Add column; persist on POST/PUT; return on GET (manual names + catalog items) |
 | Unit validation | Allow display names; allow Pieces for ex-KGS catalog items |
 | Conversion | Done on frontend — backend does **not** need kg math unless you add audit columns |
 | Validation 400 fix | Stop requiring catalog unit KGS when inventory is stored in pieces |
+| Stock | `stock_to_add` adds integer pieces: `new_qty = current + stock_to_add` |
 
 ---
 
