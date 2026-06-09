@@ -273,7 +273,20 @@ export const productsApi = {
       return apiClient.put<Product>(`/products/${id}`, formData, true)
     }
 
-    return apiClient.put<Product>(`/products/${id}`, updates)
+    // JSON PUT — backend Zod schema expects serial_numbers / serial_number_prices as JSON strings
+    const body: Record<string, unknown> = { ...updates }
+    delete body.image
+    if (updates.serial_numbers && Array.isArray(updates.serial_numbers)) {
+      body.serial_numbers = JSON.stringify(updates.serial_numbers)
+    }
+    if (updates.serial_number_prices) {
+      body.serial_number_prices = JSON.stringify(updates.serial_number_prices)
+    }
+    if (updates.use_max_cost_price !== undefined) {
+      body.use_max_cost_price = updates.use_max_cost_price
+    }
+
+    return apiClient.put<Product>(`/products/${id}`, body)
   },
 
   async delete(id: string): Promise<void> {
