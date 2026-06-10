@@ -402,9 +402,30 @@ export interface Category {
   label: string
 }
 
+function normalizeCategoriesResponse(raw: unknown): Category[] {
+  const list = Array.isArray(raw)
+    ? raw
+    : typeof raw === "object" && raw !== null && Array.isArray((raw as { data?: unknown }).data)
+      ? (raw as { data: unknown[] }).data
+      : []
+
+  return list
+    .map((item) => {
+      if (typeof item === "string") return { label: item.trim() }
+      if (typeof item === "object" && item !== null) {
+        const row = item as { label?: string; name?: string; category?: string }
+        const label = row.label || row.name || row.category
+        return label ? { label: String(label).trim() } : null
+      }
+      return null
+    })
+    .filter((c): c is Category => !!c?.label)
+}
+
 export const categoriesApi = {
   async getAll(): Promise<Category[]> {
-    return apiClient.get<Category[]>("/categories")
+    const response = await apiClient.get<unknown>("/categories")
+    return normalizeCategoriesResponse(response)
   },
 
   async getByLabel(label: string): Promise<Category> {

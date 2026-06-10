@@ -31,6 +31,46 @@ export default function SuperAdminManagerDashboard({ userName }: SuperAdminManag
   const [isDeleting, setIsDeleting] = useState<string | null>(null)
   const [referenceUnitsByName, setReferenceUnitsByName] = useState<Record<string, string>>({})
 
+  // Load categories: API + product list + reference catalog (same as product modal)
+  const loadCategories = useCallback(async (productList: Product[]) => {
+    let apiCategories: string[] = []
+    try {
+      const cats = await categoriesApi.getAll()
+      apiCategories = cats
+        .map((c) => c.label)
+        .filter((cat): cat is string => typeof cat === "string" && cat.trim() !== "")
+    } catch (err) {
+      console.warn("API categories not available, using products and reference catalog:", err)
+    }
+
+    const productCategories = Array.from(
+      new Set(productList.map((p) => p.category).filter((c): c is string => !!c && c.trim() !== ""))
+    )
+
+    let referenceCategories: string[] = []
+    try {
+      const res = await fetch("/PRODUCT_CATALOG_REFERENCE.json")
+      const data = await res.json()
+      if (Array.isArray(data)) {
+        referenceCategories = Array.from(
+          new Set(
+            data
+              .map((item: { category?: string }) => item.category)
+              .filter((cat): cat is string => typeof cat === "string" && cat.trim() !== "")
+          )
+        )
+      }
+    } catch (err) {
+      console.warn("Failed to load reference categories:", err)
+    }
+
+    const allCategories = Array.from(
+      new Set([...apiCategories, ...productCategories, ...referenceCategories])
+    ).sort((a, b) => a.localeCompare(b))
+
+    setCategories(allCategories)
+  }, [])
+
   // Load products
   const loadProducts = useCallback(async () => {
     try {
@@ -38,31 +78,19 @@ export default function SuperAdminManagerDashboard({ userName }: SuperAdminManag
       setError(null)
       const data = await productsApi.getAll()
       setProducts(data)
+      await loadCategories(data)
     } catch (err: any) {
       console.error("Failed to load products:", err)
       setError(err.message || "Failed to load products")
     } finally {
       setLoading(false)
     }
-  }, [])
+  }, [loadCategories])
 
   // Load products on mount
   useEffect(() => {
     loadProducts()
   }, [loadProducts])
-
-  // Load categories
-  useEffect(() => {
-    const loadCategories = async () => {
-      try {
-        const cats = await categoriesApi.getAll()
-        setCategories(cats.map(c => c.label))
-      } catch (err) {
-        console.error("Failed to load categories:", err)
-      }
-    }
-    loadCategories()
-  }, [])
 
   // Load product units from reference catalog (for displaying KGS/NOS/etc in UI)
   useEffect(() => {
