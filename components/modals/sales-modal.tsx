@@ -4,8 +4,9 @@ import { useState, useEffect } from "react"
 import { Card } from "@/components/ui/card"
 import { Button } from "@/components/ui/button"
 import { X, Loader2, AlertCircle, Search } from "lucide-react"
-import { productsApi, salesApi, quotationsApi, serialNumbersApi, type Product, type SerialNumber, type Quotation } from "@/lib/api"
+import { productsApi, salesApi, quotationsApi, serialNumbersApi, type Product, type SerialNumber, type Quotation, type Sale } from "@/lib/api"
 import AddressFields, { type Address } from "@/components/forms/address-fields"
+import { unitToFormSelectValue } from "@/lib/utils"
 
 interface SalesModalProps {
   saleType: "b2b" | "b2c"
@@ -72,10 +73,87 @@ export default function SalesModal({ saleType, onClose, onSave, availableStock, 
   })
 
   const [notes, setNotes] = useState("")
+  const [customerHistoryLoaded, setCustomerHistoryLoaded] = useState(false)
+  const [customerHistory, setCustomerHistory] = useState<Sale[]>([])
 
   const filteredProducts = availableStock
     ? products.filter((product) => (availableStock[product.id] || 0) > 0)
     : products
+
+  const getProductStockUnit = (productId: string): string => {
+    const product = products.find((p) => p.id === productId)
+    const display = unitToFormSelectValue(product?.unit || "")
+    return display || "units"
+  }
+
+  const normalizePhone = (value: string): string => value.replace(/\D/g, "").slice(-10)
+
+  const hydrateAddress = (source?: Partial<Address> | null): Address => ({
+    line1: source?.line1 || "",
+    line2: source?.line2 || "",
+    city: source?.city || "",
+    state: source?.state || "",
+    postal_code: source?.postal_code || "",
+    country: source?.country || "",
+  })
+
+  const loadCustomerHistory = async (): Promise<Sale[]> => {
+    if (customerHistoryLoaded) return customerHistory
+    try {
+      const allSales = await salesApi.getAll()
+      setCustomerHistory(allSales)
+      setCustomerHistoryLoaded(true)
+      return allSales
+    } catch {
+      setCustomerHistoryLoaded(true)
+      return []
+    }
+  }
+
+  const prefillByPhone = async (phone: string, target: "b2b" | "b2c") => {
+    const normalized = normalizePhone(phone)
+    if (normalized.length < 10) return
+    const allSales = await loadCustomerHistory()
+    const latestMatch = allSales
+      .filter((sale) => normalizePhone(sale.customer_phone || "") === normalized)
+      .sort((a, b) => {
+        const da = new Date(a.created_at || 0).getTime()
+        const db = new Date(b.created_at || 0).getTime()
+        return db - da
+      })[0]
+
+    if (!latestMatch) return
+
+    const billing = hydrateAddress(latestMatch.billing_address)
+    const delivery = hydrateAddress(latestMatch.delivery_address)
+    const sameDelivery = latestMatch.delivery_matches_billing ?? true
+
+    if (target === "b2b") {
+      setB2bFields((prev) => ({
+        ...prev,
+        customer_name: prev.customer_name || latestMatch.customer_name || "",
+        company_name: prev.company_name || latestMatch.company_name || "",
+        gst_number: prev.gst_number || latestMatch.gst_number || "",
+        contact_person: prev.contact_person || latestMatch.contact_person || latestMatch.customer_name || "",
+        customer_email: prev.customer_email || latestMatch.customer_email || "",
+        customer_phone: prev.customer_phone || latestMatch.customer_phone || "",
+        billing_address: prev.billing_address.line1 ? prev.billing_address : billing,
+        delivery_address: prev.delivery_address.line1 ? prev.delivery_address : delivery,
+        delivery_matches_billing: sameDelivery,
+      }))
+      return
+    }
+
+    setB2cFields((prev) => ({
+      ...prev,
+      customer_name: prev.customer_name || latestMatch.customer_name || "",
+      customer_email: prev.customer_email || latestMatch.customer_email || "",
+      customer_phone: prev.customer_phone || latestMatch.customer_phone || "",
+      billing_address: prev.billing_address.line1 ? prev.billing_address : billing,
+      delivery_address: prev.delivery_address.line1 ? prev.delivery_address : delivery,
+      delivery_matches_billing: sameDelivery,
+    }))
+  }
 
   useEffect(() => {
     const loadProducts = async () => {
@@ -339,10 +417,11 @@ export default function SalesModal({ saleType, onClose, onSave, availableStock, 
         const availableQty = availableStock[item.product_id] || 0
         if (item.quantity > availableQty) {
           const product = products.find(p => p.id === item.product_id)
+          const stockUnit = getProductStockUnit(item.product_id)
           const productLabel = product
             ? `${product.name}${product.model && product.model !== product.name ? ` - ${product.model}` : ""}`
             : "Selected product"
-          setError(`${productLabel}: Requested quantity (${item.quantity}) exceeds available stock (${availableQty} units).`)
+          setError(`${productLabel}: Requested quantity (${item.quantity}) exceeds available stock (${availableQty} ${stockUnit}).`)
           return
         }
       }
@@ -599,6 +678,9 @@ export default function SalesModal({ saleType, onClose, onSave, availableStock, 
                     type="tel"
                     value={b2bFields.customer_phone}
                     onChange={(e) => setB2bFields({ ...b2bFields, customer_phone: e.target.value })}
+                    onBlur={(e) => {
+                      void prefillByPhone(e.target.value, "b2b")
+                    }}
                     className="w-full px-4 py-2 bg-slate-700 border border-slate-600 rounded-lg text-white focus:outline-none focus:border-blue-500"
                   />
                 </div>
@@ -711,6 +793,9 @@ export default function SalesModal({ saleType, onClose, onSave, availableStock, 
                     type="tel"
                     value={b2cFields.customer_phone}
                     onChange={(e) => setB2cFields({ ...b2cFields, customer_phone: e.target.value })}
+                    onBlur={(e) => {
+                      void prefillByPhone(e.target.value, "b2c")
+                    }}
               className="w-full px-4 py-2 bg-slate-700 border border-slate-600 rounded-lg text-white focus:outline-none focus:border-blue-500"
               required
                   />
@@ -781,6 +866,10 @@ export default function SalesModal({ saleType, onClose, onSave, availableStock, 
             <div className="space-y-3">
               {items.map((item, index) => (
                 <div key={index} className="flex flex-col gap-3 p-3 bg-slate-700/30 rounded-lg">
+                  {(() => {
+                    const qtyUnit = item.product_id ? getProductStockUnit(item.product_id) : "Qty"
+                    return (
+                      <>
                   <select
                     value={item.product_id}
                     onChange={(e) => updateItem(index, "product_id", e.target.value)}
@@ -793,12 +882,13 @@ export default function SalesModal({ saleType, onClose, onSave, availableStock, 
                     )}
                     {filteredProducts.map((product) => {
                       const availableQty = availableStock?.[product.id]
+                      const stockUnit = getProductStockUnit(product.id)
                       const label = product.model && product.model !== product.name
                         ? `${product.name} - ${product.model}`
                         : product.name
                       return (
                       <option key={product.id} value={product.id}>
-                          {availableStock ? `${label} (Available: ${availableQty || 0} units)` : label}
+                          {availableStock ? `${label} (Available: ${availableQty || 0} ${stockUnit})` : label}
                       </option>
                       )
                     })}
@@ -818,7 +908,7 @@ export default function SalesModal({ saleType, onClose, onSave, availableStock, 
                         const nextQty = maxQty ? Math.min(raw, maxQty) : raw
                         updateItem(index, "quantity", nextQty)
                       }}
-                      placeholder="Qty"
+                      placeholder={qtyUnit}
                       min="1"
                       max={availableStock?.[item.product_id]}
                       className="w-full px-3 sm:px-4 py-2 bg-slate-700 border border-slate-600 rounded-lg text-white focus:outline-none focus:border-blue-500 text-sm sm:text-base"
@@ -929,6 +1019,9 @@ export default function SalesModal({ saleType, onClose, onSave, availableStock, 
                       })()}
                     </div>
                   )}
+                      </>
+                    )
+                  })()}
                 </div>
               ))}
               

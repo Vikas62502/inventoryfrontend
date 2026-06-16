@@ -6,8 +6,150 @@ import { Button } from "@/components/ui/button"
 import { X, CheckCircle, XCircle, Upload, Image as ImageIcon, Loader2, AlertCircle, Search } from "lucide-react"
 import type { StockRequest, AdminInventory } from "@/lib/api"
 import { stockRequestsApi, productsApi, adminInventoryApi, serialNumbersApi, type Product } from "@/lib/api"
-import { formatImageUrl, formatDateISO } from "@/lib/utils"
+import { formatImageUrl, formatDateISO, isSerialRequiredForDispatch } from "@/lib/utils"
 import { authService } from "@/lib/auth"
+
+function getCentralStock(product: Product | undefined): number {
+  if (!product) return 0
+  return product.quantity ?? product.central_stock ?? product.total_stock ?? 0
+}
+
+function buildInsufficientStockItemErrors(
+  items: StockRequest["items"] | undefined,
+  products: Record<string, Product>,
+  editedQuantities: Record<number, number>,
+  apiMessage?: string
+): Record<number, string> {
+  const errors: Record<number, string> = {}
+  const isStockApiError = apiMessage?.toLowerCase().includes("insufficient stock")
+
+  items?.forEach((item, index) => {
+    const product = item.product || products[item.product_id]
+    const name = product?.name || ""
+    const dispatchQty = editedQuantities[index] ?? Number(item.quantity)
+    const centralStock = getCentralStock(product)
+    const originalQty = Number(item.quantity)
+
+    if (apiMessage && name && apiMessage.toLowerCase().includes(name.toLowerCase())) {
+      errors[index] = apiMessage
+      return
+    }
+
+    if (centralStock < dispatchQty) {
+      errors[index] = `Insufficient stock: ${centralStock} in central inventory (${dispatchQty} to dispatch)`
+      return
+    }
+
+    if (isStockApiError && centralStock < originalQty) {
+      errors[index] = `Insufficient stock: only ${centralStock} available (${originalQty} requested) — reduce dispatch to ${centralStock}`
+    }
+  })
+
+  return errors
+}
+
+function buildSerialItemErrors(
+  items: StockRequest["items"] | undefined,
+  products: Record<string, Product>,
+  apiMessage: string
+): Record<number, string> {
+  const errors: Record<number, string> = {}
+  const lower = apiMessage.toLowerCase()
+  if (!lower.includes("serial")) return errors
+
+  items?.forEach((item, index) => {
+    const product = item.product || products[item.product_id]
+    const name = product?.name || ""
+    if (name && lower.includes(name.toLowerCase())) {
+      errors[index] =
+        `${apiMessage}. Re-select an available serial or verify it is linked to this product in Product Manager.`
+    }
+  })
+
+  if (Object.keys(errors).length === 0) {
+    items?.forEach((item, index) => {
+      const product = item.product || products[item.product_id]
+      if (isSerialRequiredForDispatch(product?.category, product?.name)) {
+        errors[index] =
+          `${apiMessage}. The serial may not be linked to product_id ${item.product_id} in the database — backend must validate by product_name if product_id differs.`
+      }
+    })
+  }
+
+  return errors
+}
+
+function buildPartialDispatchItemErrors(
+  items: StockRequest["items"] | undefined,
+  products: Record<string, Product>,
+  editedQuantities: Record<number, number>
+): Record<number, string> {
+  const errors: Record<number, string> = {}
+  items?.forEach((item, index) => {
+    const product = item.product || products[item.product_id]
+    const originalQty = Number(item.quantity)
+    const dispatchQty = editedQuantities[index] ?? originalQty
+    if (dispatchQty < originalQty) {
+      const name = product?.name || "Unknown product"
+      errors[index] =
+        `Dispatching ${dispatchQty} of ${originalQty} requested. Backend must deduct ${dispatchQty} from central stock (not ${originalQty}).`
+    }
+  })
+  return errors
+}
+
+function buildPartialDispatchBlockErrors(
+  items: StockRequest["items"] | undefined,
+  products: Record<string, Product>,
+  editedQuantities: Record<number, number>
+): Record<number, string> {
+  const errors: Record<number, string> = {}
+  items?.forEach((item, index) => {
+    const product = item.product || products[item.product_id]
+    if (!isSerialRequiredForDispatch(product?.category, product?.name)) return
+    const originalQty = Number(item.quantity)
+    const dispatchQty = editedQuantities[index] ?? originalQty
+    const centralStock = getCentralStock(product)
+    if (dispatchQty < originalQty) {
+      if (centralStock >= originalQty) {
+        errors[index] =
+          `Partial dispatch is not supported yet. Increase quantity to ${originalQty} and select ${originalQty} serials.`
+      } else {
+        errors[index] =
+          `Only ${centralStock} in stock but ${originalQty} requested. Partial dispatch (${dispatchQty}) needs a backend fix — reject request or add stock.`
+      }
+    }
+  })
+  return errors
+}
+
+function buildBackendDeductionHintErrors(
+  items: StockRequest["items"] | undefined,
+  products: Record<string, Product>,
+  editedQuantities: Record<number, number>,
+  selectedSerialNumbers: Record<string, string[]>
+): Record<number, string> {
+  const errors: Record<number, string> = {}
+  items?.forEach((item, index) => {
+    const product = item.product || products[item.product_id]
+    if (!isSerialRequiredForDispatch(product?.category, product?.name)) return
+    const dispatchQty = editedQuantities[index] ?? Number(item.quantity)
+    const serialCount = selectedSerialNumbers[item.product_id]?.length ?? 0
+    const deductQty = serialCount || dispatchQty
+    errors[index] =
+      `Backend stock error: must deduct ${deductQty} (serials selected), not the full requested quantity.`
+  })
+  return errors
+}
+
+function scrollToDispatchItem(index: number) {
+  requestAnimationFrame(() => {
+    document.getElementById(`dispatch-item-${index}`)?.scrollIntoView({
+      behavior: "smooth",
+      block: "center",
+    })
+  })
+}
 
 interface EnhancedRequestApprovalModalProps {
   request: StockRequest
@@ -28,6 +170,7 @@ export default function EnhancedRequestApprovalModal({
   const [imagePreview, setImagePreview] = useState<string | null>(null)
   const [isSubmitting, setIsSubmitting] = useState(false)
   const [error, setError] = useState<string | null>(null)
+  const [itemErrors, setItemErrors] = useState<Record<number, string>>({})
   const [fullRequest, setFullRequest] = useState<StockRequest>(request)
   const [products, setProducts] = useState<Record<string, Product>>({})
   const [loading, setLoading] = useState(true)
@@ -58,7 +201,7 @@ export default function EnhancedRequestApprovalModal({
         // Initialize edited quantities with original quantities
         const initialQuantities: Record<number, number> = {}
         fullRequestData.items?.forEach((item, index) => {
-          initialQuantities[index] = item.quantity
+          initialQuantities[index] = Number(item.quantity)
         })
         setEditedQuantities(initialQuantities)
 
@@ -70,10 +213,10 @@ export default function EnhancedRequestApprovalModal({
         })
         setProducts(productsMap)
 
-        // Fetch current admin's inventory
         const currentAdmin = authService.getUser()
         setCurrentUser(currentAdmin)
-        if (currentAdmin?.id) {
+        // Admin inventory applies to admin role only — super-admin uses central stock from products
+        if (currentAdmin?.role === "admin" && currentAdmin.id) {
           try {
             const adminInv = await adminInventoryApi.getByAdmin(currentAdmin.id)
             const inventoryMap: Record<string, number> = {}
@@ -85,16 +228,24 @@ export default function EnhancedRequestApprovalModal({
             console.error("Failed to load admin inventory:", invErr)
             setAdminInventory({})
           }
+        } else {
+          setAdminInventory({})
         }
         
-        // If super admin, fetch available serial numbers (status=available) for each product
+        // Panels & Inverters only — fetch available serial numbers for dispatch
         if (currentAdmin?.role === "super-admin" && fullRequestData.items) {
           const serialNumbersMap: Record<string, any[]> = {}
           for (const item of fullRequestData.items) {
+            const product = item.product || productsMap[item.product_id]
+            if (!isSerialRequiredForDispatch(product?.category, product?.name)) {
+              serialNumbersMap[item.product_id] = []
+              continue
+            }
             try {
-              const product = item.product || productsMap[item.product_id]
-              const productName = product?.name
-              const serials = await serialNumbersApi.getAvailableByProduct(item.product_id, productName)
+              const serials = await serialNumbersApi.getAvailableByProduct(
+                item.product_id,
+                product?.name
+              )
               serialNumbersMap[item.product_id] = serials
             } catch (err) {
               console.error(`Failed to load serial numbers for product ${item.product_id}:`, err)
@@ -110,7 +261,7 @@ export default function EnhancedRequestApprovalModal({
         // Initialize with original request quantities
         const initialQuantities: Record<number, number> = {}
         request.items?.forEach((item, index) => {
-          initialQuantities[index] = item.quantity
+          initialQuantities[index] = Number(item.quantity)
         })
         setEditedQuantities(initialQuantities)
       } finally {
@@ -151,9 +302,24 @@ export default function EnhancedRequestApprovalModal({
       ...prev,
       [index]: quantity
     }))
+    const item = fullRequest.items?.[index]
+    if (item) {
+      setSelectedSerialNumbers((prev) => {
+        const current = prev[item.product_id] || []
+        if (current.length <= quantity) return prev
+        return { ...prev, [item.product_id]: current.slice(0, quantity) }
+      })
+    }
+    setItemErrors((prev) => {
+      if (!prev[index]) return prev
+      const next = { ...prev }
+      delete next[index]
+      return next
+    })
+    setError(null)
   }
 
-  const toggleSerialSelection = (productId: string, serialNumber: string, maxQty: number) => {
+  const toggleSerialSelection = (productId: string, serialNumber: string, maxQty: number, itemIndex?: number) => {
     setSelectedSerialNumbers((prev) => {
       const current = prev[productId] || []
       const isSelected = current.includes(serialNumber)
@@ -163,30 +329,88 @@ export default function EnhancedRequestApprovalModal({
       if (current.length >= maxQty) return prev
       return { ...prev, [productId]: [...current, serialNumber] }
     })
+    if (itemIndex !== undefined) {
+      setItemErrors((prev) => {
+        if (!prev[itemIndex]) return prev
+        const next = { ...prev }
+        delete next[itemIndex]
+        return next
+      })
+      setError(null)
+    }
   }
 
   const handleApprove = async () => {
     setIsSubmitting(true)
     setError(null)
+    setItemErrors({})
 
     try {
-      // Check if any quantities were modified
-      const hasModifiedQuantities = fullRequest.items?.some((item, index) => {
-        const editedQty = editedQuantities[index] ?? item.quantity
-        return editedQty !== item.quantity
-      })
+      if (currentUser?.role === "super-admin" && fullRequest.items?.length) {
+        const stockErrors = buildInsufficientStockItemErrors(
+          fullRequest.items,
+          products,
+          editedQuantities
+        )
 
-      // If quantities were modified, we need to update the request first
-      if (hasModifiedQuantities && fullRequest.items) {
-        const updatedItems = fullRequest.items.map((item, index) => ({
-          product_id: item.product_id,
-          quantity: editedQuantities[index] ?? item.quantity
-        }))
-        
-        // Update the request with modified quantities
-        await stockRequestsApi.update(request.id, {
-          items: updatedItems
+        if (Object.keys(stockErrors).length > 0) {
+          setItemErrors(stockErrors)
+          setIsSubmitting(false)
+          return
+        }
+      }
+
+      if (currentUser?.role === "super-admin" && fullRequest.items?.length) {
+        const serialItemErrors: Record<number, string> = {}
+
+        fullRequest.items.forEach((item, index) => {
+          const product = item.product || products[item.product_id]
+          const requiresSerial = isSerialRequiredForDispatch(product?.category, product?.name)
+          if (!requiresSerial) return
+
+          const editedQty = editedQuantities[index] ?? Number(item.quantity)
+          const availableSerials = availableSerialNumbers[item.product_id] || []
+          const selectedSerials = selectedSerialNumbers[item.product_id] || []
+          const range = serialNumberRanges[index]
+          const usesSerialRange = Boolean(range?.from && range?.to)
+          const name = product?.name || "Unknown product"
+
+          if (usesSerialRange) return
+
+          if (availableSerials.length > 0 && selectedSerials.length !== editedQty) {
+            serialItemErrors[index] =
+              `Select exactly ${editedQty} serial number${editedQty === 1 ? "" : "s"} (${selectedSerials.length} selected)`
+            return
+          }
+
+          if (availableSerials.length === 0) {
+            serialItemErrors[index] =
+              "Serial numbers are required for Panels and Inverters — add available serials or use a range below"
+          }
         })
+
+        if (Object.keys(serialItemErrors).length > 0) {
+          setItemErrors(serialItemErrors)
+          setError(null)
+          setIsSubmitting(false)
+          scrollToDispatchItem(Math.min(...Object.keys(serialItemErrors).map(Number)))
+          return
+        }
+
+        const partialBlockErrors = buildPartialDispatchBlockErrors(
+          fullRequest.items,
+          products,
+          editedQuantities
+        )
+        if (Object.keys(partialBlockErrors).length > 0) {
+          setItemErrors(partialBlockErrors)
+          setError(
+            "One or more lines use partial dispatch, which the backend does not support yet. See highlighted items below."
+          )
+          setIsSubmitting(false)
+          scrollToDispatchItem(Math.min(...Object.keys(partialBlockErrors).map(Number)))
+          return
+        }
       }
 
       // Prepare serial number ranges for dispatch (if super admin and ranges are provided)
@@ -194,22 +418,68 @@ export default function EnhancedRequestApprovalModal({
         currentUser?.role === "super-admin" && Object.keys(serialNumberRanges).length > 0
           ? Object.entries(serialNumberRanges).reduce((acc, [index, range]) => {
               const item = fullRequest.items?.[parseInt(index)]
-              if (item && range.from && range.to) {
+              const product = item ? item.product || products[item.product_id] : undefined
+              if (item && range.from && range.to && isSerialRequiredForDispatch(product?.category, product?.name)) {
                 acc[item.product_id] = range
               }
               return acc
             }, {} as Record<string, { from: string; to: string }>)
           : undefined
 
-      // Build serial_numbers map for dispatch (product_id -> selected serials)
+      const serialRequiredProductIds = new Set(
+        fullRequest.items
+          ?.filter((item) => {
+            const product = item.product || products[item.product_id]
+            return isSerialRequiredForDispatch(product?.category, product?.name)
+          })
+          .map((item) => item.product_id) ?? []
+      )
+
+      const serialNumberEntries = Object.entries(selectedSerialNumbers).filter(
+        ([productId, arr]) => serialRequiredProductIds.has(productId) && arr.length > 0
+      )
+
+      if (currentUser?.role === "super-admin" && fullRequest.items?.length) {
+        const serialItemErrors: Record<number, string> = {}
+
+        for (let index = 0; index < fullRequest.items.length; index++) {
+          const item = fullRequest.items[index]
+          const product = item.product || products[item.product_id]
+          if (!isSerialRequiredForDispatch(product?.category, product?.name)) continue
+
+          const range = serialNumberRanges[index]
+          if (range?.from && range?.to) continue
+
+          const selected = selectedSerialNumbers[item.product_id] || []
+          if (selected.length === 0) continue
+
+          const freshSerials = await serialNumbersApi.getAvailableByProduct(
+            item.product_id,
+            product?.name
+          )
+          const availableSet = new Set(freshSerials.map((s) => s.serial_number))
+          const invalid = selected.filter((sn) => !availableSet.has(sn))
+          if (invalid.length > 0) {
+            const name = product?.name || "Unknown product"
+            serialItemErrors[index] =
+              `${name}: serial ${invalid.join(", ")} is not available for dispatch. Pick another serial or fix product linkage in the backend.`
+          }
+        }
+
+        if (Object.keys(serialItemErrors).length > 0) {
+          setItemErrors(serialItemErrors)
+          setIsSubmitting(false)
+          return
+        }
+      }
+
       const serialNumbersData =
-        currentUser?.role === "super-admin" && Object.keys(selectedSerialNumbers).length > 0
-          ? Object.fromEntries(
-              Object.entries(selectedSerialNumbers).filter(([, arr]) => arr.length > 0)
-            )
+        currentUser?.role === "super-admin" && serialNumberEntries.length > 0
+          ? Object.fromEntries(serialNumberEntries)
           : undefined
 
-      // Dispatch the request
+      // Do not send `items` — backend mis-validates (e.g. "cannot exceed originally requested")
+      // or runs requester-only PUT logic. Partial qty is implied by serial_numbers count.
       await stockRequestsApi.dispatch(request.id, {
         dispatch_image: dispatchImage || undefined,
         serial_number_ranges: serialNumberRangesData,
@@ -218,7 +488,89 @@ export default function EnhancedRequestApprovalModal({
       onApprove()
       onClose()
     } catch (err: any) {
-      setError(err.message || "Failed to dispatch stock request")
+      const message = err.message || "Failed to dispatch stock request"
+      if (message.toLowerCase().includes("insufficient stock")) {
+        const stockErrors = buildInsufficientStockItemErrors(
+          fullRequest.items,
+          products,
+          editedQuantities,
+          message
+        )
+        if (Object.keys(stockErrors).length > 0) {
+          setItemErrors(stockErrors)
+          setError(null)
+        } else {
+          setError(message)
+        }
+      } else if (
+        message.toLowerCase().includes("serial") &&
+        (message.toLowerCase().includes("invalid") ||
+          message.toLowerCase().includes("not available") ||
+          message.toLowerCase().includes("required"))
+      ) {
+        const serialErrors = buildSerialItemErrors(fullRequest.items, products, message)
+        if (Object.keys(serialErrors).length > 0) {
+          setItemErrors(serialErrors)
+          setError(null)
+        } else {
+          setError(message)
+        }
+      } else if (
+        message.toLowerCase().includes("cannot exceed originally requested") ||
+        message.toLowerCase().includes("cannot exceed requested")
+      ) {
+        const partialErrors = buildPartialDispatchItemErrors(
+          fullRequest.items,
+          products,
+          editedQuantities
+        )
+        if (Object.keys(partialErrors).length > 0) {
+          setItemErrors(partialErrors)
+          setError(null)
+        } else {
+          setError(
+            `${message}. Backend must accept partial dispatch when serial count is less than requested quantity.`
+          )
+        }
+      } else if (
+        message.includes("products_quantity_check") ||
+        message.toLowerCase().includes("check constraint") ||
+        message.toLowerCase().includes("quantity negative")
+      ) {
+        const partialErrors = buildPartialDispatchItemErrors(
+          fullRequest.items,
+          products,
+          editedQuantities
+        )
+        const deductionErrors = buildBackendDeductionHintErrors(
+          fullRequest.items,
+          products,
+          editedQuantities,
+          selectedSerialNumbers
+        )
+        const merged =
+          Object.keys(partialErrors).length > 0
+            ? Object.fromEntries(
+                Object.entries(partialErrors).map(([idx, msg]) => [
+                  idx,
+                  `${msg} Backend must deduct serial count, not requested quantity.`,
+                ])
+              )
+            : deductionErrors
+        setItemErrors(merged)
+        setError(
+          Object.keys(partialErrors).length > 0
+            ? "Partial dispatch failed — backend deducts the wrong quantity. See highlighted items."
+            : "Stock update failed on dispatch — backend deducts the wrong quantity. See highlighted items."
+        )
+        scrollToDispatchItem(Math.min(...Object.keys(merged).map(Number)))
+      } else if (message.toLowerCase().includes("permission to update")) {
+        setError(
+          `${message}. If you reduced quantities, select the matching serial numbers and try again. The backend must allow dispatch without a separate stock-request update.`
+        )
+      } else {
+        setError(message)
+      }
       setIsSubmitting(false)
     }
   }
@@ -285,31 +637,73 @@ export default function EnhancedRequestApprovalModal({
                       const productModel = product?.model || ""
                       // For Super Admin: show available serials. For Admin: show admin inventory.
                       const adminStock = adminInventory[item.product_id] ?? 0
-                      const originalQuantity = item.quantity
+                      const centralStock = getCentralStock(product)
+                      const originalQuantity = Number(item.quantity)
                       const editedQuantity = editedQuantities[index] ?? originalQuantity
                       const isModified = editedQuantity !== originalQuantity
-                      
+                      const isSuperAdmin = currentUser?.role === "super-admin"
+                      const requiresSerial = isSerialRequiredForDispatch(product?.category, productName)
+                      const insufficientCentralStock = centralStock < editedQuantity
+                      const itemError = itemErrors[index]
                       const serialRange = serialNumberRanges[index] || { from: "", to: "" }
                       const availableSerials = availableSerialNumbers[item.product_id] || []
                       const selectedSerials = selectedSerialNumbers[item.product_id] || []
-                      const isSuperAdmin = currentUser?.role === "super-admin"
+                      const usesSerialRange = Boolean(serialRange.from && serialRange.to)
+                      const serialCountMismatch =
+                        requiresSerial &&
+                        isSuperAdmin &&
+                        !usesSerialRange &&
+                        availableSerials.length > 0 &&
+                        selectedSerials.length !== editedQuantity
+                      const showItemError =
+                        Boolean(itemError) ||
+                        (isSuperAdmin && insufficientCentralStock) ||
+                        serialCountMismatch
                       
                       return (
-                        <div key={index} className="p-3 bg-slate-600/50 rounded gap-3 space-y-3">
+                        <div
+                          id={`dispatch-item-${index}`}
+                          key={index}
+                          className={`p-3 rounded gap-3 space-y-3 ${
+                            showItemError
+                              ? "bg-red-950/30 border border-red-800/50"
+                              : "bg-slate-600/50"
+                          }`}
+                        >
                           <div className="flex justify-between items-center">
                             <div className="flex-1 min-w-0">
                             <p className="text-white font-medium">
                               {productName} {productModel && `- ${productModel}`}
                             </p>
                               {isSuperAdmin ? (
-                                <p className="text-slate-400 text-xs mt-1">
-                                  Available serial numbers: {availableSerials.length}
-                                  {selectedSerials.length > 0 && (
-                                    <span className="text-cyan-400 ml-1">
-                                      ({selectedSerials.length} selected for dispatch)
-                                    </span>
+                                <>
+                                  <p
+                                    className={`text-xs mt-1 ${
+                                      insufficientCentralStock ? "text-red-400" : "text-slate-400"
+                                    }`}
+                                  >
+                                    Central stock: {centralStock} units
+                                    {insufficientCentralStock && (
+                                      <span className="ml-1">
+                                        (short by {editedQuantity - centralStock})
+                                      </span>
+                                    )}
+                                  </p>
+                                  {requiresSerial ? (
+                                    <p className="text-slate-400 text-xs mt-1">
+                                      Available serial numbers: {availableSerials.length}
+                                      {selectedSerials.length > 0 && (
+                                        <span className="text-cyan-400 ml-1">
+                                          ({selectedSerials.length} selected for dispatch)
+                                        </span>
+                                      )}
+                                    </p>
+                                  ) : (
+                                    <p className="text-slate-400 text-xs mt-1">
+                                      Serial numbers not required for this category
+                                    </p>
                                   )}
-                                </p>
+                                </>
                               ) : (
                                 <p className="text-slate-400 text-xs mt-1">My Stock: {adminStock} units</p>
                               )}
@@ -317,6 +711,17 @@ export default function EnhancedRequestApprovalModal({
                                 <p className="text-amber-400 text-xs mt-1">
                                   Original: {originalQuantity} units
                                 </p>
+                              )}
+                              {showItemError && (
+                                <div className="flex items-start gap-1.5 mt-2 p-2 bg-red-900/40 border border-red-700/60 rounded text-xs text-red-300">
+                                  <AlertCircle className="w-3.5 h-3.5 flex-shrink-0 mt-0.5" />
+                                  <span>
+                                    {itemError ||
+                                      (serialCountMismatch
+                                        ? `Select exactly ${editedQuantity} serial number${editedQuantity === 1 ? "" : "s"} (${selectedSerials.length} selected)`
+                                        : `Insufficient stock: ${centralStock} in central inventory (${editedQuantity} to dispatch)`)}
+                                  </span>
+                                </div>
                               )}
                             </div>
                             <div className="flex items-center gap-2 flex-shrink-0">
@@ -335,8 +740,8 @@ export default function EnhancedRequestApprovalModal({
                             </div>
                           </div>
                           
-                          {/* Available Serial Numbers - Select which to dispatch (Super Admin). Only available (status=available) serials shown. */}
-                          {isSuperAdmin && (
+                          {/* Serial selection — Panels & Inverters only */}
+                          {isSuperAdmin && requiresSerial && (
                             <div className="pt-2 border-t border-slate-700 space-y-2">
                               <p className="text-xs text-slate-400 font-medium">
                                 Select serial numbers to dispatch (choose up to {editedQuantity}). Only available serials shown.
@@ -375,7 +780,7 @@ export default function EnhancedRequestApprovalModal({
                                           type="checkbox"
                                           checked={isChecked}
                                           disabled={atLimit}
-                                          onChange={() => toggleSerialSelection(item.product_id, snStr, editedQuantity)}
+                                          onChange={() => toggleSerialSelection(item.product_id, snStr, editedQuantity, index)}
                                           className="rounded border-slate-600 bg-slate-700 text-cyan-500"
                                         />
                                         <span className="text-white font-mono whitespace-nowrap">{snStr}</span>

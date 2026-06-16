@@ -13,7 +13,7 @@ import { useSalesState } from "@/hooks/use-sales-state"
 import { authService } from "@/lib/auth"
 import { salesApi, productsApi, quotationsApi, adminInventoryApi, type Quotation, type AdminInventory } from "@/lib/api"
 import { generateQuotationPDF } from "@/lib/quotation-generator"
-import { formatDateISO } from "@/lib/utils"
+import { formatDateISO, unitToFormSelectValue } from "@/lib/utils"
 import type { Sale as ApiSale, Product } from "@/lib/api"
 
 // Type alias for Sale from API (which has snake_case properties)
@@ -383,7 +383,10 @@ export default function AgentDashboard({ userName }: AgentDashboardProps) {
         product: inv.product || products[inv.product_id],
         unit: (() => {
           const refProduct = referenceData.find((item: any) => item.id === inv.product_id || item.name === inv.product?.name)
-          return refProduct?.unit ? (unitDisplayMap[refProduct.unit] || refProduct.unit) : ""
+          if (refProduct?.unit) return unitDisplayMap[refProduct.unit] || refProduct.unit
+          const productUnit = products[inv.product_id]?.unit || inv.product?.unit
+          const normalized = unitToFormSelectValue(productUnit || "")
+          return normalized || ""
         })(),
       }
     })

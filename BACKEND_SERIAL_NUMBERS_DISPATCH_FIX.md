@@ -69,12 +69,98 @@ WHERE product_name = :productName
 
 ---
 
+## Critical Bug: Serial Shows Available but Dispatch Fails
+
+### Error
+
+```
+Some serial numbers are invalid or not available for product 5.4KWP - GTI - 1PH - 1MPPT - VSOLE
+```
+
+### Symptom
+
+- `GET /api/products/:id/serial-numbers` returns serial `2602420290` with `status = 'available'`
+- User selects it in the dispatch modal
+- `POST /api/stock-requests/:id/dispatch` rejects the same serial
+
+### Root cause (common)
+
+`GET` and `POST dispatch` use **different lookup logic**:
+
+| Step | Wrong (causes bug) | Correct |
+|------|-------------------|---------|
+| GET serials | Query by `product_name` OR embedded `products.serial_numbers` array | Query `product_serial_numbers` with consistent rules |
+| POST dispatch | Validate serial only by `product_id` from request payload key | Also match by `product_name` + `serial_number` if `product_id` differs in table |
+
+Example: serial row has `product_name = '5.4KWP-GTI-1PH-1MPPT-VSOLE'` but `product_id` is NULL or a different UUID than the stock request line → GET finds it, dispatch rejects it.
+
+### Backend fix — unified serial lookup
+
+Use **one shared function** for GET and dispatch:
+
+```typescript
+async function findAvailableSerialsForProduct(productId: string): Promise<SerialRow[]> {
+  const product = await Product.findByPk(productId)
+  if (!product) return []
+
+  return db.query(`
+    SELECT * FROM product_serial_numbers
+    WHERE status = 'available'
+      AND (owner_type = 'super-admin' OR owner_type IS NULL)
+      AND (
+        product_id = :productId
+        OR product_name = :productName
+        OR TRIM(product_name) = TRIM(:productName)
+      )
+  `, { productId, productName: product.name })
+}
+
+async function validateSerialForDispatch(
+  productId: string,
+  serialNumber: string
+): Promise<SerialRow | null> {
+  const available = await findAvailableSerialsForProduct(productId)
+  return available.find(s => s.serial_number === serialNumber) ?? null
+}
+```
+
+**Rule:** If a serial is returned by GET for `productId`, dispatch **must accept** it for the same `productId`.
+
+### Dispatch payload — parse `serial_numbers`
+
+Frontend sends (JSON body):
+
+```json
+{
+  "serial_numbers": "{\"prod-uuid-54\":[\"2602420290\"],\"prod-uuid-6kw\":[\"2602420999\"]}"
+}
+```
+
+Or multipart field `serial_numbers` as the same JSON string.
+
+**Backend must:** `JSON.parse(serial_numbers)` when value is a string.
+
+### Debug SQL
+
+```sql
+SELECT id, product_id, product_name, serial_number, status, owner_type, owner_id
+FROM product_serial_numbers
+WHERE serial_number = '2602420290';
+```
+
+Compare `product_id` with the stock request line’s `product_id`. If they differ, fix data or use `product_name` fallback in dispatch validation.
+
+---
+
 ## Checklist
 
-- [ ] `GET /api/products/:id/serial-numbers` returns serial numbers for the product (by product_id or product_name)
-- [ ] If table uses `product_name`, join/lookup product name from products table first
-- [ ] Filter by `status = 'available'` (or return all and let frontend filter)
+- [ ] `GET /api/products/:id/serial-numbers` returns serial numbers for the product (by product_id **or** product_name)
+- [ ] **Dispatch uses the same lookup** as GET — serial shown as available must pass dispatch validation
+- [ ] If table uses `product_name` only, join product name from `products` table on both GET and dispatch
+- [ ] Filter by `status = 'available'` for dispatch selection
 - [ ] Include `serial_number` field (your table may use a different column name)
+- [ ] Parse `serial_numbers` JSON string on `POST .../dispatch` (application/json and multipart)
+- [ ] Do **not** rely on stale `products.serial_numbers` JSON column for availability — use `product_serial_numbers` table
 
 ---
 

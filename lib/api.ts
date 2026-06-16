@@ -323,46 +323,58 @@ export const serialNumbersApi = {
   },
 
   /** Get serial numbers available for dispatch. Tries multiple endpoints - backend may use product_id or product_name. */
-  async getAvailableByProduct(productId: string, productName?: string): Promise<SerialNumber[]> {
-    const toSerial = (s: string | { serial_number: string; id?: string }, i: number): SerialNumber =>
-      typeof s === "string"
-        ? { id: `f-${i}-${s}`, product_id: productId, serial_number: s }
-        : { id: (s as any).id || `f-${i}-${(s as any).serial_number}`, product_id: productId, serial_number: (s as any).serial_number, status: (s as any).status }
-
-    let all: SerialNumber[] = []
+  async getAvailableByProduct(
+    productId: string,
+    productName?: string,
+    options?: { strict?: boolean }
+  ): Promise<SerialNumber[]> {
+    const strict = options?.strict ?? false
     const endpoints: (() => Promise<SerialNumber[]>)[] = [
+      async () => apiClient.get<SerialNumber[]>(`/products/${productId}/serial-numbers`, { status: "available" }),
       async () => apiClient.get<SerialNumber[]>(`/products/${productId}/serial-numbers`),
-      async () => {
-        const p = await apiClient.get<any>(`/products/${productId}`)
-        const sns = p?.serial_numbers || p?.SerialNumbers
-        return Array.isArray(sns) ? sns.map((s, i) => toSerial(s, i)) : []
-      },
       async () => apiClient.get<SerialNumber[]>("/serial-numbers", { product_id: productId, status: "available" }),
       async () => apiClient.get<SerialNumber[]>("/serial-numbers", { product_id: productId }),
+      async () => apiClient.get<SerialNumber[]>("/product-serial-numbers", { product_id: productId, status: "available" }),
       async () => apiClient.get<SerialNumber[]>("/product-serial-numbers", { product_id: productId }),
     ]
     if (productName) {
       endpoints.push(
+        async () => apiClient.get<SerialNumber[]>("/serial-numbers", { product_name: productName, status: "available" }),
         async () => apiClient.get<SerialNumber[]>("/serial-numbers", { product_name: productName }),
+        async () => apiClient.get<SerialNumber[]>("/product-serial-numbers", { product_name: productName, status: "available" }),
         async () => apiClient.get<SerialNumber[]>("/product-serial-numbers", { product_name: productName })
       )
     }
+
+    const bySerial = new Map<string, SerialNumber>()
     for (const fn of endpoints) {
       try {
         const result = await fn()
-        if (Array.isArray(result) && result.length > 0) {
-          all = result
-          break
+        if (!Array.isArray(result)) continue
+        for (const row of result) {
+          const sn = (typeof row === "string" ? row : row.serial_number)?.trim()
+          if (!sn) continue
+          const status = (typeof row === "string" ? "" : row.status || "").toLowerCase()
+          const existing = bySerial.get(sn)
+          const normalized: SerialNumber =
+            typeof row === "string"
+              ? { id: `f-${sn}`, product_id: productId, serial_number: sn, status: "available" }
+              : { ...row, product_id: row.product_id || productId, serial_number: sn }
+          if (!existing || (status === "available" && existing.status !== "available")) {
+            bySerial.set(sn, normalized)
+          }
         }
       } catch {
         continue
       }
     }
-    // Exclude only dispatched, sold, acknowledged. Default/new serials (no status or "available") are shown.
-    const excluded = ["dispatched", "sold", "acknowledged"]
-    return all.filter((s) => {
+
+    const excluded = new Set(["dispatched", "sold", "acknowledged"])
+    return Array.from(bySerial.values()).filter((s) => {
       const status = (s.status || "").toLowerCase()
-      return !status || status === "available" || !excluded.includes(status)
+      if (excluded.has(status)) return false
+      if (strict) return status === "available"
+      return !status || status === "available"
     })
   },
 
@@ -528,6 +540,8 @@ export const stockRequestsApi = {
     data?: {
       rejection_reason?: string
       dispatch_image?: File
+      /** Optional adjusted line items (super-admin dispatch). Sent on dispatch instead of PUT update. */
+      items?: Array<{ product_id: string; quantity: number }>
       serial_number_ranges?: Record<string, { from: string; to: string }>
       /** Map product_id -> serial numbers selected for dispatch. Backend updates status to "dispatched". */
       serial_numbers?: Record<string, string[]>
@@ -539,6 +553,9 @@ export const stockRequestsApi = {
         formData.append("rejection_reason", data.rejection_reason)
       }
       formData.append("dispatch_image", data.dispatch_image)
+      if (data.items?.length) {
+        formData.append("items", JSON.stringify(data.items))
+      }
       if (data.serial_number_ranges) {
         formData.append("serial_number_ranges", JSON.stringify(data.serial_number_ranges))
       }
@@ -551,11 +568,14 @@ export const stockRequestsApi = {
     if (data?.rejection_reason) {
       body.rejection_reason = data.rejection_reason
     }
+    if (data?.items?.length) {
+      body.items = data.items
+    }
     if (data?.serial_number_ranges) {
-      body.serial_number_ranges = data.serial_number_ranges
+      body.serial_number_ranges = JSON.stringify(data.serial_number_ranges)
     }
     if (data?.serial_numbers) {
-      body.serial_numbers = data.serial_numbers
+      body.serial_numbers = JSON.stringify(data.serial_numbers)
     }
     return apiClient.post<StockRequest>(`/stock-requests/${id}/dispatch`, body)
   },

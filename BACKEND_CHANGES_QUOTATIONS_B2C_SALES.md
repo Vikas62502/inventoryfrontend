@@ -3,6 +3,14 @@
 ## Overview
 The frontend has been updated to integrate quotations API with B2C sales. Agents can now select customers from existing quotations, and all customer details will auto-fill from the quotation data.
 
+### Additional update (June 2026)
+
+The sales modal now also supports **phone-based prefill** from previous sales (B2B/B2C) and unit-aware stock display in agent stock-out.
+
+- Multiple PI/sales for the same customer phone are allowed.
+- Customer profile should be prefillable by phone (latest sale data).
+- Product `unit` must be returned reliably for proper stock labels (Meters, Quantity, Pieces, etc.).
+
 ---
 
 ## 🎯 Current Status

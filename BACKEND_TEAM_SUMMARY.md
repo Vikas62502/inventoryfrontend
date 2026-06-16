@@ -1,7 +1,121 @@
 # Backend Team – Summary of Required Changes
 
-**Last Updated:** February 2025  
+**Last Updated:** June 2026  
 **For:** Backend developers
+
+---
+
+## 🚨 Priority 0.5: Agent Stock-Out UX (Units + Prefill + Multiple PI)
+
+### What frontend now does
+
+1. **Unit-aware stock labels**
+   - Agent stock and stock-out dropdown now display real units (`Meters`, `Quantity`, `Pieces`, etc.), not generic `units`.
+2. **Phone-based prefill in sales modal**
+   - In B2B/B2C stock-out, when agent enters a phone number, frontend looks up prior sales and prefills customer details.
+   - Agent re-enters only stock/out item lines.
+3. **Multiple PI per customer**
+   - Frontend allows creating multiple B2B/B2C sales (PI) for same customer/phone.
+
+### Backend changes required
+
+| Area | Required backend behavior |
+|------|----------------------------|
+| `GET /api/products` | Return stable `unit` per product (`NOS`, `MTR`, `PCS`, etc.) so UI can map unit labels consistently |
+| `GET /api/sales` | Must return prior sales including `customer_phone`, `customer_name`, `customer_email`, `company_name`, `contact_person`, `gst_number`, `billing_address`, `delivery_address` |
+| Sales uniqueness | **Do not** enforce unique customer phone per sale/PI; allow multiple sales/PI rows for same customer |
+| Optional helper API | Add `GET /api/sales/customer-by-phone?phone=...` returning latest customer profile (faster than scanning all sales) |
+
+### Recommended helper endpoint (optional but preferred)
+
+**Endpoint:** `GET /api/sales/customer-by-phone?phone=9876543210`
+
+**Response:**
+```json
+{
+  "customer_name": "ABC Solar",
+  "company_name": "ABC Solar Pvt Ltd",
+  "contact_person": "Ravi Sharma",
+  "customer_email": "abc@example.com",
+  "customer_phone": "9876543210",
+  "gst_number": "08ABCDE1234F1Z5",
+  "billing_address": {
+    "line1": "Sitapura",
+    "city": "Jaipur",
+    "state": "Rajasthan",
+    "postal_code": "302022",
+    "country": "India"
+  },
+  "delivery_address": {
+    "line1": "Sitapura",
+    "city": "Jaipur",
+    "state": "Rajasthan",
+    "postal_code": "302022",
+    "country": "India"
+  },
+  "delivery_matches_billing": true,
+  "last_sale_id": "sale_123",
+  "last_sale_at": "2026-06-16T08:00:00.000Z"
+}
+```
+
+**If no match:** return `404` with `{ "error": "Customer not found" }` or `200` with `null`.
+
+---
+
+## 🚨 Priority 0: Stock Request Dispatch (Super Admin)
+
+**Full spec:** **`BACKEND_CHANGES_STOCK_REQUEST_DISPATCH.md`**  
+**Serial API fix:** **`BACKEND_SERIAL_NUMBERS_DISPATCH_FIX.md`**
+
+### Errors seen in production / QA
+
+| Error | Backend fix |
+|-------|-------------|
+| `You do not have permission to update this request` | Super Admin must dispatch via `POST /stock-requests/:id/dispatch` only — no `PUT` update first |
+| `Insufficient stock` (partial dispatch) | Validate/deduct using **dispatch qty** = `len(serial_numbers[product_id])`, not original requested qty |
+| `products_quantity_check` constraint | Same — deducting requested qty (2) when stock is 1 and dispatch is 1 serial → negative quantity |
+| `cannot exceed originally requested quantity` | Accept partial dispatch: `dispatch_qty = len(serial_numbers)` may be **less than** requested — do not require `items` |
+| `Some serial numbers are invalid or not available` | GET and POST must use **same** serial lookup (`product_id` OR `product_name`) |
+| Generic DB errors in UI | Return `{ error, details[] }` with `product_name` — do not expose raw PostgreSQL text |
+
+### Dispatch payload (frontend today)
+
+```json
+{
+  "serial_numbers": "{\"prod-id-1\":[\"2602420290\"],\"prod-id-2\":[\"XWS0326L06202N\"]}"
+}
+```
+
+- `serial_numbers` is a **JSON string** — parse before use
+- **Panels & Inverters only** — meters/cables omitted from map
+- **No `items` field** — partial qty implied by serial count
+- `dispatch_qty` per line = number of serials sent for that `product_id`
+
+### Stock deduction (critical)
+
+```typescript
+// Per request line — not global requested qty
+dispatch_qty = serial_numbers[product_id]?.length ?? request_line.quantity
+if (products.quantity < dispatch_qty) return 400  // before UPDATE
+products.quantity -= dispatch_qty               // never subtract requested_qty on partial dispatch
+```
+
+### Multi-item request (3 inverters in one dispatch)
+
+| Line | Requested | Stock | Serials sent | Must deduct |
+|------|-----------|-------|--------------|-------------|
+| 6KWP | 2 | 1 | 1 | **1** (not 2) |
+| 8KWP | 3 | 3 | 3 | **3** |
+| 10KWP | 2 | 2 | 2 | **2** |
+
+One wrong line (deducting 2 for 6KWP) fails the **entire** dispatch with `products_quantity_check`.
+
+### Frontend status
+
+- Sends `serial_numbers` JSON string only (no `items`)
+- Serials required: **Panels & Inverters** only
+- **Blocks partial dispatch** in UI until backend supports `dispatch_qty < requested_qty`
 
 ---
 
@@ -34,7 +148,8 @@
 
 3. **PUT /api/products/:id** – When adding stock with `serial_numbers`, insert rows into `product_serial_numbers` with **`status = 'available'`**.
 
-**Serial numbers by category:** Panels, Inverters, Meter require serial numbers. Other categories: optional. Backend must accept `stock_to_add` **without** `serial_numbers` (update quantity only).
+**Serial numbers by category (product create):** Panels, Inverters, Meter — serials on add stock.  
+**Serial numbers on dispatch:** **Panels & Inverters only** (not meters). See `BACKEND_CHANGES_STOCK_REQUEST_DISPATCH.md` §5.
 
 ---
 

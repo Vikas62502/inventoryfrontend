@@ -181,3 +181,26 @@ export function formatProductSaveError(err: unknown, fallback: string): string {
   const primary = err instanceof Error ? err.message : fallback
   return primary || fallback
 }
+
+const SERIAL_REQUIRED_DISPATCH_CATEGORIES = new Set([
+  "panels",
+  "panel",
+  "solar panels",
+  "solar panel",
+  "inverter",
+  "inverters",
+])
+
+/** Serial numbers required on dispatch only for Panels and Inverters. */
+export function isSerialRequiredForDispatch(
+  category?: string | null,
+  productName?: string | null
+): boolean {
+  const normalized = (category || "").toLowerCase().trim()
+  if (normalized) {
+    if (SERIAL_REQUIRED_DISPATCH_CATEGORIES.has(normalized)) return true
+    if (normalized.includes("panel") || normalized.includes("inverter")) return true
+  }
+  const name = (productName || "").toLowerCase()
+  return name.includes("inverter") || name.includes("kwp") || name.includes("panel")
+}
