@@ -191,16 +191,25 @@ const SERIAL_REQUIRED_DISPATCH_CATEGORIES = new Set([
   "inverters",
 ])
 
-/** Serial numbers required on dispatch only for Panels and Inverters. */
+/** Serial numbers required for Panels and Inverters only (create, edit, add stock, dispatch). */
 export function isSerialRequiredForDispatch(
   category?: string | null,
   productName?: string | null
 ): boolean {
   const normalized = (category || "").toLowerCase().trim()
+  if (normalized === "meter" || normalized === "meters") return false
   if (normalized) {
     if (SERIAL_REQUIRED_DISPATCH_CATEGORIES.has(normalized)) return true
     if (normalized.includes("panel") || normalized.includes("inverter")) return true
   }
   const name = (productName || "").toLowerCase()
+  if (
+    name.includes("meter") &&
+    !name.includes("inverter") &&
+    !name.includes("kwp") &&
+    !name.includes("panel")
+  ) {
+    return false
+  }
   return name.includes("inverter") || name.includes("kwp") || name.includes("panel")
 }

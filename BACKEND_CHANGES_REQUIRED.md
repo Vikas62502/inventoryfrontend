@@ -1,8 +1,10 @@
 # Backend Changes Required – Product Map, Serial Numbers, Selling Price
 
-**Last Updated:** February 2025  
+**Last Updated:** June 2026  
 **For:** Backend Team  
 **Purpose:** Consolidated list of required backend changes based on current frontend behavior.
+
+> **🚨 Meter serial validation (June 2026):** Backend still rejects Meter products without serials. See **`BACKEND_CHANGES_METER_SERIAL_OPTIONAL.md`** for the exact fix.
 
 ---
 
@@ -16,7 +18,7 @@
 | **Cost price per serial** | Cost price saved per serial number | Store in `product_serial_numbers.cost_price` |
 | **Selling price (separate)** | Super Admin sets selling price per product; different from cost | `products.selling_price` column; separate from `unit_price` |
 | **Quotations** | Agent quotation amounts use selling price, not cost | Use `selling_price` for quotation line-item rates and amounts |
-| **Serial numbers by category** | Panels, Inverters, Meter: required. Other categories: optional | Accept `stock_to_add` without `serial_numbers`; accept product creation with quantity but no serials |
+| **Serial numbers by category** | **Panels & Inverters only:** required. **Meters & others:** optional | Accept `POST/PUT` with `quantity` / `stock_to_add` and **no** `serial_numbers` for Meters |
 
 ---
 
@@ -67,7 +69,7 @@ Use `default_price` for all, or `serial_number_prices[serial_number]` for each.
 
 **PUT /api/products/:id** – When adding stock:
 
-*With serial numbers (Panels, Inverters, Meter):*
+*With serial numbers (Panels, Inverters only):*
 ```
 stock_to_add: 2
 serial_numbers: ["SN004", "SN005"]
@@ -171,24 +173,41 @@ ALTER TABLE product_serial_numbers ADD COLUMN IF NOT EXISTS cost_price DECIMAL(1
 
 ---
 
-## 6. Serial Numbers Optional for Some Categories
+## 6. Serial Numbers by Category (Panels & Inverters Only)
 
-**Requirement:** Serial numbers are **required** for Panels, Inverters, and Meter. For **other categories**, serial numbers are **optional** when adding stock.
+**Full spec:** **`BACKEND_CHANGES_METER_SERIAL_OPTIONAL.md`**
 
-**Frontend behavior:**
-- Panels, Inverters, Meter: Frontend always sends `serial_numbers` when quantity/stock_to_add > 0
-- Other categories: Frontend may send `stock_to_add` **without** `serial_numbers`
+**Requirement:** Serial numbers are **required** only for **Panels** and **Inverters**. **Meters** and all other categories are **quantity-only** — no serial validation on create or add stock.
+
+| Category | Serial required? |
+|----------|------------------|
+| Panels / Solar Panels | ✅ Yes |
+| Inverters | ✅ Yes |
+| **Meters** | ❌ **No** |
+| Cables, hardware, etc. | ❌ No |
+
+**Frontend behavior (June 2026):**
+- Panels, Inverters: Frontend sends `serial_numbers` when quantity/stock_to_add > 0 (or blocks submit)
+- **Meters:** Frontend creates with quantity only — **does not** send `serial_numbers`
+- Other categories: `stock_to_add` without `serial_numbers` is allowed
 
 **Backend must:**
-1. **PUT /api/products/:id** – Accept `stock_to_add` without `serial_numbers`
-   - When `stock_to_add` is provided but `serial_numbers` is omitted or empty: update product quantity only, do not create serial number records
-   - When both are provided: create serial number records as usual
+1. Implement `requiresSerialNumbers(category, productName)` — **exclude** `meter` / `meters` (see meter doc for pseudocode)
+2. **POST /api/products** – For Meter + `quantity > 0` without `serial_numbers` → **201**, product created, no serial rows
+3. **PUT /api/products/:id** – For Meter + `stock_to_add > 0` without `serial_numbers` → increment quantity only
+4. **Do not** return: `"Serial numbers are required for Panels, Inverters, and Meter categories"` for Meter products
 
-2. **POST /api/products** – Accept product creation with `quantity` > 0 but without `serial_numbers`
-   - When `quantity` is provided but `serial_numbers` is omitted or empty: create product with quantity, do not create serial number records
-   - When both are provided: create product and serial number records as usual
+**Example – Create Meter without serial numbers (must succeed):**
+```
+POST /api/products
+name: SCHNEIDER 3 PHASE SOLAR METER
+category: Meters
+quantity: 30
+unit: MTR
+unit_price: 2900
+```
 
-**Example – Add stock without serial numbers (optional category):**
+**Example – Add stock without serial numbers (Meter or optional category):**
 ```
 PUT /api/products/:id
 Content-Type: application/json (or multipart/form-data)
@@ -203,7 +222,7 @@ When `stock_to_add` is provided, the backend must compute: `new_quantity = curre
 - Wrong: new_quantity = stock_to_add - current_quantity (would give 21) ✗
 The frontend does NOT send `quantity` when `stock_to_add` is present, to avoid conflicts. Backend must ADD.
 
-### Assign serial numbers to existing stock (Panels, Inverters, Meter)
+### Assign serial numbers to existing stock (Panels, Inverters only)
 
 When a product has stock but no serial numbers assigned (e.g. created before serial tracking), the frontend allows "assigning" serial numbers to existing stock:
 
@@ -249,7 +268,9 @@ CREATE TABLE IF NOT EXISTS product_serial_numbers (
 ## Verification Checklist
 
 - [ ] **POST /api/products** with `serial_numbers` → rows inserted into `product_serial_numbers`
-- [ ] **POST /api/products** with `quantity` but no `serial_numbers` → product created, quantity updated (optional categories)
+- [ ] **POST /api/products** — `category: Meters`, `quantity: 30`, no `serial_numbers` → **201** (not 400)
+- [ ] **POST /api/products** with `quantity` but no `serial_numbers` → product created (Meters and other non-serial categories)
+- [ ] **POST /api/products** — Panels/Inverters, `quantity > 0`, no serials → **400**
 - [ ] **PUT /api/products/:id** with `stock_to_add` and `serial_numbers` → new rows inserted
 - [ ] **PUT /api/products/:id** with `stock_to_add` but no `serial_numbers` → quantity updated only (optional categories)
 - [ ] **GET /api/products/:id/serial-numbers** → returns array of serial numbers for that product
@@ -269,6 +290,7 @@ CREATE TABLE IF NOT EXISTS product_serial_numbers (
 | **BACKEND_CHANGES_COST_PRICE_SELLING_PRICE_SERIALS.md** | Cost vs selling price, quotation pricing |
 | **BACKEND_CHANGES_FRONTEND_UPDATES.md** | Frontend payload examples |
 | **BACKEND_TEAM_SUMMARY.md** | API overview |
+| **BACKEND_CHANGES_METER_SERIAL_OPTIONAL.md** | Meter serial optional — fix validation error |
 
 ---
 

@@ -85,14 +85,10 @@ class ApiClient {
       }
 
       if (!response.ok) {
-        // Handle 401 Unauthorized - clear token and redirect to login
-        if (response.status === 401) {
-          if (typeof window !== "undefined") {
-            localStorage.removeItem("auth_token")
-            localStorage.removeItem("auth_user")
-            // Redirect to login will be handled by the app state
-          }
-        }
+        // Do not clear auth automatically on every 401.
+        // Some endpoints can return action-level unauthorized while the
+        // overall session is still valid. Auto-clearing here logs users out
+        // unexpectedly on refresh after a single failed action.
 
         // Ensure error message is always a string
         let errorMessage = `HTTP error! status: ${response.status}`
@@ -212,12 +208,7 @@ class ApiClient {
         const responseData = await response.json()
 
         if (!response.ok) {
-          if (response.status === 401) {
-            if (typeof window !== "undefined") {
-              localStorage.removeItem("auth_token")
-              localStorage.removeItem("auth_user")
-            }
-          }
+          // Keep auth token on action-level 401 (see note in request()).
           // Ensure error message is always a string
           let errorMessage = `HTTP error! status: ${response.status}`
           if (responseData.error) {
@@ -286,12 +277,7 @@ class ApiClient {
         const responseData = await response.json()
 
         if (!response.ok) {
-          if (response.status === 401) {
-            if (typeof window !== "undefined") {
-              localStorage.removeItem("auth_token")
-              localStorage.removeItem("auth_user")
-            }
-          }
+          // Keep auth token on action-level 401 (see note in request()).
           // Ensure error message is always a string
           let errorMessage = `HTTP error! status: ${response.status}`
           if (responseData.error) {

@@ -19,6 +19,7 @@ import {
   convertKgPriceToPiecePrice,
   convertPiecePriceToKgPrice,
   unitToFormSelectValue,
+  isSerialRequiredForDispatch,
 } from "@/lib/utils"
 
 interface ProductModalProps {
@@ -425,21 +426,9 @@ export default function ProductModal({ product, onClose, onSave }: ProductModalP
     }
   }, [formData.name, referenceData])
 
-  // Barcode/serial numbers required for Panels, Inverters, Meter; optional for others
-  const BARCODE_REQUIRED_CATEGORIES = [
-    "panels",
-    "panel",
-    "solar panels",
-    "solar panel",
-    "inverter",
-    "inverters",
-    "meter",
-    "meters",
-  ]
-  const isBarcodeRequiredForCategory = (category: string) => {
-    const c = (category || "").toLowerCase().trim()
-    return BARCODE_REQUIRED_CATEGORIES.includes(c)
-  }
+  // Serial numbers required for Panels and Inverters only; optional for Meters and other categories
+  const isBarcodeRequiredForCategory = (category: string) =>
+    isSerialRequiredForDispatch(category, formData.name)
 
   // Filter products based on selected category
   const filteredProducts = formData.category 
@@ -859,7 +848,7 @@ export default function ProductModal({ product, onClose, onSave }: ProductModalP
     }
   }, [serialNumberMethod])
 
-  // For Panels, Inverters, Meter: default to Barcode Scanner when serial entry appears (Add Stock or Assign to existing)
+  // For Panels and Inverters: default to Barcode Scanner when serial entry appears (Add Stock or Assign to existing)
   const prevStockToAddRef = useRef(0)
   const assignSectionShownRef = useRef(false)
   useEffect(() => {
@@ -952,10 +941,10 @@ export default function ProductModal({ product, onClose, onSave }: ProductModalP
         productData.unit_price = 0
       }
       
-      // Panels, Inverters, Meter: serial numbers required when quantity > 0
+      // Panels and Inverters: serial numbers required when quantity > 0
       if (quantity > 0 && isBarcodeRequiredForCategory(categoryName)) {
         if (serialNumbers.length === 0 && !serialNumberExcelFile) {
-          setError("Serial numbers are required for Panels, Inverters, and Meter categories. Please enter or scan serial numbers.")
+          setError("Serial numbers are required for Panels and Inverters. Please enter or scan serial numbers.")
           setLoading(false)
           return
         }
@@ -1110,7 +1099,7 @@ export default function ProductModal({ product, onClose, onSave }: ProductModalP
 
         if (stockToAddPieces > 0 && isBarcodeRequiredForCategory(categoryName)) {
           if (serialNumbers.length === 0 && !serialNumberExcelFile) {
-            setError("Serial numbers are required for Panels, Inverters, and Meter categories. Please enter or scan serial numbers.")
+            setError("Serial numbers are required for Panels and Inverters. Please enter or scan serial numbers.")
             setLoading(false)
             return
           }
@@ -1150,7 +1139,18 @@ export default function ProductModal({ product, onClose, onSave }: ProductModalP
         category: categoryName,
         wattage: formData.wattage || undefined,
         image: imageFile || undefined,
-        quantity: finalQuantity,
+      }
+      // Edit without add-stock: omit quantity/category so backend does not re-validate serials for Meters
+      if (!product?.id || stockToAdd > 0) {
+        productData.quantity = finalQuantity
+      }
+      if (
+        product?.id &&
+        stockToAdd === 0 &&
+        !isBarcodeRequiredForCategory(categoryName) &&
+        (product.category || "").trim() === categoryName
+      ) {
+        delete productData.category
       }
       if (resolvedUnit) {
         productData.unit = resolvedUnit
@@ -1189,8 +1189,15 @@ export default function ProductModal({ product, onClose, onSave }: ProductModalP
         productData.stock_to_add = stockToAddPieces
       }
       
-      // Assign serial numbers to existing stock (Panels/Inverters/Meter: stock exists but no serials yet)
-      if (product?.id && stockToAdd === 0 && serialNumbersForExisting.length > 0 && existingStock > 0 && assignedSerialNumbers.length === 0) {
+      // Assign serial numbers to existing stock (Panels/Inverters only)
+      if (
+        product?.id &&
+        stockToAdd === 0 &&
+        isBarcodeRequiredForCategory(categoryName) &&
+        serialNumbersForExisting.length > 0 &&
+        existingStock > 0 &&
+        assignedSerialNumbers.length === 0
+      ) {
         if (serialNumbersForExisting.length !== existingStock) {
           setError(`Please enter ${existingStock} serial numbers for existing stock. Currently have ${serialNumbersForExisting.length}.`)
           setLoading(false)
@@ -1212,7 +1219,11 @@ export default function ProductModal({ product, onClose, onSave }: ProductModalP
           productData.use_max_cost_price = false
           productData.selling_price = toPiecePrice(sellingPriceOverride)
         } else {
-          productData.use_max_cost_price = useMaxCostForSelling
+          // Meters have no serial rows — max-cost-from-serials does not apply
+          productData.use_max_cost_price =
+            !isBarcodeRequiredForCategory(categoryName) && assignedSerialNumbers.length === 0
+              ? false
+              : useMaxCostForSelling
         }
         if (formData.price > 0) {
           productData.unit_price = toPiecePrice(formData.price)
@@ -1313,7 +1324,7 @@ export default function ProductModal({ product, onClose, onSave }: ProductModalP
         }
       } else {
         // Create new product in Step 1, then attach serials/pricing in Step 2 — unless the backend
-        // rejects creates without serials for Panels / Inverters / Meter. Then open Step 2 first and
+        // rejects creates without serials for Panels / Inverters. Then open Step 2 first and
         // create on Complete with serials (handleSerialNumbersSubmit fallback path).
         const resolvedCreate = resolveInventoryForSave(formData.quantity || 0, "create")
         if (resolvedCreate.error) {
@@ -1454,7 +1465,7 @@ export default function ProductModal({ product, onClose, onSave }: ProductModalP
                 </span>
                 {formData.quantity > 0 && (
                   <span className={`text-xs ml-2 font-normal ${isBarcodeRequiredForCategory(formData.category) ? "text-amber-400" : "text-slate-500"}`}>
-                    {isBarcodeRequiredForCategory(formData.category) ? "(Required for Panels, Inverters, Meter)" : "(Optional for other categories)"}
+                    {isBarcodeRequiredForCategory(formData.category) ? "(Required for Panels and Inverters)" : "(Optional for other categories)"}
                   </span>
                 )}
               </label>
@@ -2155,7 +2166,8 @@ Example: SN001, SN002, SN003"
                 </div>
               </div>
               
-              {/* Assigned Serial Numbers Section - Always show in edit mode */}
+              {/* Assigned Serial Numbers — Panels/Inverters only; Meters are quantity-tracked */}
+              {isBarcodeRequiredForCategory(formData.category) && (
               <div className="p-3 bg-slate-800/50 border border-slate-600 rounded-lg">
                 <div className="flex items-center justify-between">
                   <div>
@@ -2220,6 +2232,7 @@ Example: SN001, SN002, SN003"
                   </button>
                 </div>
               </div>
+              )}
               
               {/* Super Admin: Selling Price – separate field, applies to whole product (by name) */}
               {isSuperAdmin && product?.id && (
@@ -2347,7 +2360,7 @@ Example: SN001, SN002, SN003"
                       ({serialNumbers.length} of {stockToAdd} entered)
                     </span>
                     <span className={`text-xs ml-2 font-normal ${isBarcodeRequiredForCategory(formData.category) ? "text-amber-400" : "text-slate-500"}`}>
-                      {isBarcodeRequiredForCategory(formData.category) ? "(Required for Panels, Inverters, Meter)" : "(Optional for other categories)"}
+                      {isBarcodeRequiredForCategory(formData.category) ? "(Required for Panels and Inverters)" : "(Optional for other categories)"}
                     </span>
                   </label>
                   

@@ -14,7 +14,7 @@ import { useStockRequestsState } from "@/hooks/use-stock-requests-state"
 import { usersApi, stockReturnsApi, productsApi, adminInventoryApi } from "@/lib/api"
 import type { AdminInventory } from "@/lib/api"
 import { authService, type User } from "@/lib/auth"
-import { formatDateISO } from "@/lib/utils"
+import { formatDateISO, unitToFormSelectValue } from "@/lib/utils"
 import type { StockRequest, StockReturn, Product } from "@/lib/api"
 
 interface AdminDashboardProps {
@@ -54,6 +54,11 @@ export default function AdminDashboard({ userName }: AdminDashboardProps) {
   
   // Tab state
   const [activeTab, setActiveTab] = useState<string>("overview")
+
+  const getProductUnitLabel = (product?: Product): string => {
+    const unit = unitToFormSelectValue(product?.unit || "")
+    return unit || "units"
+  }
 
   const currentUserId = authService.getUser()?.id
   const currentUser = authService.getUser()
@@ -947,6 +952,7 @@ export default function AdminDashboard({ userName }: AdminDashboardProps) {
                           const productName = product?.name || "Unknown Product"
                           const productModel = product?.model || ""
                           const productCategory = product?.category || ""
+                          const productUnit = getProductUnitLabel(product)
 
                           return (
                             <Card
@@ -974,7 +980,7 @@ export default function AdminDashboard({ userName }: AdminDashboardProps) {
                                     <p className="text-2xl font-bold text-green-400">
                                       {item.quantity}
                                     </p>
-                                    <p className="text-xs text-slate-400">units</p>
+                                    <p className="text-xs text-slate-400">{productUnit}</p>
                                   </div>
                                 </div>
                                 <div className="pt-2 border-t border-slate-700 flex items-center justify-between">
@@ -1032,6 +1038,7 @@ export default function AdminDashboard({ userName }: AdminDashboardProps) {
                                 const productName = product?.name || "Unknown Product"
                                 const productModel = product?.model || ""
                                 const productCategory = product?.category || ""
+                                const productUnit = getProductUnitLabel(product)
 
                                 return (
                                   <tr
@@ -1051,7 +1058,7 @@ export default function AdminDashboard({ userName }: AdminDashboardProps) {
                                       <span className="text-green-400 font-bold text-lg">
                                         {item.quantity}
                                       </span>
-                                      <span className="text-slate-400 text-sm ml-1">units</span>
+                                      <span className="text-slate-400 text-sm ml-1">{productUnit}</span>
                                     </td>
                                     <td className="px-6 py-4 text-slate-400 text-sm">
                                       {formatDateISO(item.updated_at)}

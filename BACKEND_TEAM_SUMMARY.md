@@ -129,6 +129,28 @@ One wrong line (deducting 2 for 6KWP) fails the **entire** dispatch with `produc
 
 ---
 
+## 🚨 Priority 0.6: Meter Products — Serial Numbers Optional (Product Create)
+
+**Full spec:** **`BACKEND_CHANGES_METER_SERIAL_OPTIONAL.md`**
+
+### Error in production
+
+Creating a Meter product with quantity and no serials fails with backend validation (frontend already fixed).
+
+### Backend fix (summary)
+
+| Endpoint | Change |
+|----------|--------|
+| `POST /api/products` | Allow `category: Meters`, `quantity > 0`, **no** `serial_numbers` → **201** |
+| `PUT /api/products/:id` | Allow `stock_to_add > 0` for Meters without `serial_numbers` |
+| Category helper | `requiresSerialNumbers()` — **Panels & Inverters only**; exclude `meter` / `meters` |
+
+**Serial numbers by category (product create):** **Panels & Inverters only** — serials required on add stock.  
+**Meters:** quantity + `unit_price` only — **no serial validation**.  
+**Serial numbers on dispatch:** **Panels & Inverters only** (not meters). See `BACKEND_CHANGES_STOCK_REQUEST_DISPATCH.md` §5.
+
+---
+
 ## 🚨 Priority 1: Serial Numbers Not Showing After Add
 
 **Issue:** Users add products with serial numbers, but View All shows "No serial numbers assigned."
@@ -147,9 +169,6 @@ One wrong line (deducting 2 for 6KWP) fails the **entire** dispatch with `produc
 2. **GET /api/products/:id/serial-numbers** – Return array of serial number objects with: `id`, `serial_number`, `cost_price`, `product_name`, `category`, `status`, `created_at`. **Products added default to available** so they appear in the dispatch modal.
 
 3. **PUT /api/products/:id** – When adding stock with `serial_numbers`, insert rows into `product_serial_numbers` with **`status = 'available'`**.
-
-**Serial numbers by category (product create):** Panels, Inverters, Meter — serials on add stock.  
-**Serial numbers on dispatch:** **Panels & Inverters only** (not meters). See `BACKEND_CHANGES_STOCK_REQUEST_DISPATCH.md` §5.
 
 ---
 
@@ -173,7 +192,7 @@ One wrong line (deducting 2 for 6KWP) fails the **entire** dispatch with `produc
 | Field | Type | When |
 |-------|------|------|
 | `stock_to_add` | number | When adding stock |
-| `serial_numbers` | JSON string array | Optional – when adding stock with serials (required for Panels, Inverters, Meter; optional for others) |
+| `serial_numbers` | JSON string array | Optional – required only for **Panels & Inverters** when adding stock with serials; **optional for Meters** and others |
 | `default_price` or `serial_number_prices` | number / object | Same as POST |
 | `product_name`, `product_category` | string | Optional |
 

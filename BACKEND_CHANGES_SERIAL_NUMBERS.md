@@ -121,12 +121,13 @@ formData.append("serial_numbers", JSON.stringify(["SN001", "SN002", "SN003", "SN
 formData.append("serial_number_excel", excelFile) // For Excel/CSV upload
 ```
 
-**Validation:**
+**Validation (category-aware):**
 1. If `stock_to_add > 0`:
-   - If `serial_numbers` is provided: validate that `serial_numbers.length === stock_to_add`
-   - ~~If `serial_number_image` is provided: extract serial numbers using OCR~~ (REMOVED: Photo upload no longer supported)
+   - Resolve product category/name → `requiresSerialNumbers(category, name)` (Panels & Inverters **only** — see **`BACKEND_CHANGES_METER_SERIAL_OPTIONAL.md`**)
+   - If `requiresSerialNumbers` is **true** and no `serial_numbers` / `serial_number_excel`: return **400** — serials required
+   - If `requiresSerialNumbers` is **false** (Meters, cables, etc.): increment quantity only; serials optional
+   - If `serial_numbers` is provided: validate `serial_numbers.length === stock_to_add`
    - If `serial_number_excel` is provided: extract serial numbers from Excel/CSV file (see section 3.2)
-   - If none are provided: return error (serial numbers are required when adding stock)
 
 **Response:**
 ```json
