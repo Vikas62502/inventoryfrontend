@@ -702,6 +702,17 @@ export const salesApi = {
     return apiClient.get<Sale>(`/sales/${id}`)
   },
 
+  async getCustomerByPhone(phone: string): Promise<SalesCustomerByPhoneResponse | null> {
+    try {
+      return await apiClient.get<SalesCustomerByPhoneResponse>("/sales/customer-by-phone", {
+        phone,
+      })
+    } catch (err: any) {
+      if (err?.status === 404) return null
+      throw err
+    }
+  },
+
   async create(
     sale: {
       type: "B2B" | "B2C"
@@ -1005,6 +1016,58 @@ export interface QuotationDetailResponse {
   data: Quotation
 }
 
+export interface CustomerPrefillAddress {
+  line1: string
+  line2?: string
+  city: string
+  state: string
+  postal_code: string
+  country: string
+}
+
+export interface CustomerPrefillProfile {
+  customer_name: string
+  customer_phone: string
+  customer_email?: string
+  company_name?: string | null
+  gst_number?: string | null
+  contact_person?: string | null
+  billing_address: CustomerPrefillAddress
+  delivery_address: CustomerPrefillAddress
+  delivery_matches_billing?: boolean
+}
+
+export interface QuotationCustomerByPhoneResponse {
+  success: boolean
+  source: "quotation" | "customer"
+  customer: CustomerPrefillProfile
+  quotation: {
+    id: string
+    status: string
+    created_at: string | null
+  } | null
+}
+
+export interface SalesCustomerByPhoneResponse {
+  customer: CustomerPrefillProfile & {
+    type?: string | null
+    delivery_instructions?: string | null
+    notes?: string | null
+  }
+  latest_sale?: Sale
+  recent_sales?: Array<{
+    id: string
+    type: string
+    sale_date: string
+    customer_name: string
+    customer_phone?: string
+    customer_email?: string
+    company_name?: string
+    gst_number?: string
+    contact_person?: string
+  }>
+}
+
 // Agent-Dealer mapping API
 export interface AgentDealerResponse {
   dealerId: string
@@ -1118,6 +1181,17 @@ export const quotationsApi = {
       throw new Error("Unexpected quotation detail response format")
     } catch (err: any) {
       console.error("Error fetching quotation details:", err)
+      throw err
+    }
+  },
+
+  async getCustomerByPhone(phone: string): Promise<QuotationCustomerByPhoneResponse | null> {
+    try {
+      return await apiClient.get<QuotationCustomerByPhoneResponse>("/quotations/customer-by-phone", {
+        phone,
+      })
+    } catch (err: any) {
+      if (err?.status === 404) return null
       throw err
     }
   },

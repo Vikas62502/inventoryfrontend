@@ -12,8 +12,10 @@
 1. **Unit-aware stock labels**
    - Agent stock and stock-out dropdown now display real units (`Meters`, `Quantity`, `Pieces`, etc.), not generic `units`.
 2. **Phone-based prefill in sales modal**
-   - In B2B/B2C stock-out, when agent enters a phone number, frontend looks up prior sales and prefills customer details.
-   - Agent re-enters only stock/out item lines.
+   - When agent types the **10th digit**, frontend calls:
+     1. `GET /api/quotations/customer-by-phone?phone=...`
+     2. `GET /api/sales/customer-by-phone?phone=...` (if quotation returns 404)
+   - Name, email, billing + delivery address auto-fill immediately.
 3. **Multiple PI per customer**
    - Frontend allows creating multiple B2B/B2C sales (PI) for same customer/phone.
 
@@ -24,11 +26,41 @@
 | `GET /api/products` | Return stable `unit` per product (`NOS`, `MTR`, `PCS`, etc.) so UI can map unit labels consistently |
 | `GET /api/sales` | Must return prior sales including `customer_phone`, `customer_name`, `customer_email`, `company_name`, `contact_person`, `gst_number`, `billing_address`, `delivery_address` |
 | Sales uniqueness | **Do not** enforce unique customer phone per sale/PI; allow multiple sales/PI rows for same customer |
-| Optional helper API | Add `GET /api/sales/customer-by-phone?phone=...` returning latest customer profile (faster than scanning all sales) |
+| **Quotation prefill by phone** | **`GET /api/quotations/customer-by-phone?phone=...`** — latest quotation customer + address |
+| Sales prefill fallback | **`GET /api/sales/customer-by-phone?phone=...`** — latest sale customer + address |
 
-### Recommended helper endpoint (optional but preferred)
+**Full spec:** **`BACKEND_CHANGES_QUOTATIONS_B2C_SALES.md`** §3–4
 
-**Endpoint:** `GET /api/sales/customer-by-phone?phone=9876543210`
+### Quotation customer by phone (primary prefill)
+
+**Endpoint:** `GET /api/quotations/customer-by-phone?phone=9876543210`
+
+**Response:**
+```json
+{
+  "success": true,
+  "source": "quotation",
+  "customer": {
+    "customer_name": "Ravi Sharma",
+    "customer_phone": "9876543210",
+    "customer_email": "ravi@example.com",
+    "billing_address": {
+      "line1": "Sitapura",
+      "city": "Jaipur",
+      "state": "Rajasthan",
+      "postal_code": "302022",
+      "country": "India"
+    },
+    "delivery_address": { "..." },
+    "delivery_matches_billing": true
+  },
+  "quotation": { "id": "QT-C0FMAY", "status": "approved", "created_at": "..." }
+}
+```
+
+**404** if no quotation for phone. Route must be registered before `GET /quotations/:id`.
+
+### Sales customer by phone (fallback)
 
 **Response:**
 ```json

@@ -5,10 +5,14 @@ The frontend has been updated to integrate quotations API with B2C sales. Agents
 
 ### Additional update (June 2026)
 
-The sales modal now also supports **phone-based prefill** from previous sales (B2B/B2C) and unit-aware stock display in agent stock-out.
+The sales modal now also supports **phone-based prefill** from:
+1. **Latest quotation** by mobile (`GET /api/quotations/customer-by-phone`) — **new, preferred**
+2. **Latest prior sale** by mobile (`GET /api/sales/customer-by-phone`) — fallback
+
+Also: unit-aware stock display in agent stock-out, multiple PI/sales per customer phone.
 
 - Multiple PI/sales for the same customer phone are allowed.
-- Customer profile should be prefillable by phone (latest sale data).
+- Customer profile should be prefillable by phone (quotation first, then sale).
 - Product `unit` must be returned reliably for proper stock labels (Meters, Quantity, Pieces, etc.).
 
 ---
@@ -16,7 +20,7 @@ The sales modal now also supports **phone-based prefill** from previous sales (B
 ## 🎯 Current Status
 
 **Frontend Status**: ✅ Complete and Ready  
-**Backend Status**: ⏳ Needs Verification/Implementation
+**Backend Status**: ⏳ Deploy `GET /api/quotations/customer-by-phone` (implemented in `inventorybackend`, needs production deploy)
 
 ---
 
@@ -165,6 +169,131 @@ The sales modal now also supports **phone-based prefill** from previous sales (B
 - `dealer` - Dealer information
 - `products` - Product details
 - `pricing` - Pricing information
+
+---
+
+### 3. Get Customer by Phone (from Quotation) — **NEW**
+
+**Endpoint**: `GET /api/quotations/customer-by-phone?phone={mobile}`
+
+**Purpose**: When agent types a phone number in B2C/B2B stock-out (without selecting from quotation dropdown), fetch customer name + full address from the **latest quotation** for that mobile — same data as `GET /api/quotations/{id}` but keyed by phone.
+
+**Route order**: Must be registered **before** `GET /api/quotations/:quotationId` (literal path `customer-by-phone`).
+
+**Authorization**: Same as quotation read (`authorizeDealerAdminOrVisitor`):
+- Inventory agents: quotations for mapped dealer only
+- Inventory admin / super-admin: all quotations
+- Account managers: approved quotations only
+- Dealers: own quotations; dealer admins: all
+
+**Query params**:
+| Param | Required | Description |
+|-------|----------|-------------|
+| `phone` | Yes | 10-digit mobile (also accepts `+91`, spaces) |
+
+**Success response (200)**:
+```json
+{
+  "success": true,
+  "source": "quotation",
+  "customer": {
+    "customer_name": "Ravi Sharma",
+    "customer_phone": "9876543210",
+    "customer_email": "ravi@example.com",
+    "company_name": null,
+    "gst_number": null,
+    "contact_person": "Ravi Sharma",
+    "billing_address": {
+      "line1": "Sitapura Industrial Area",
+      "line2": "",
+      "city": "Jaipur",
+      "state": "Rajasthan",
+      "postal_code": "302022",
+      "country": "India"
+    },
+    "delivery_address": {
+      "line1": "Sitapura Industrial Area",
+      "line2": "",
+      "city": "Jaipur",
+      "state": "Rajasthan",
+      "postal_code": "302022",
+      "country": "India"
+    },
+    "delivery_matches_billing": true
+  },
+  "quotation": {
+    "id": "QT-C0FMAY",
+    "status": "approved",
+    "created_at": "2026-06-18T10:00:00.000Z"
+  }
+}
+```
+
+**Address mapping** (quotation DB → inventory sales form):
+
+| Quotation `customer` field | Response field |
+|----------------------------|----------------|
+| `streetAddress` | `billing_address.line1` |
+| `city` | `billing_address.city` |
+| `state` | `billing_address.state` |
+| `pincode` | `billing_address.postal_code` |
+| — | `billing_address.country` = `"India"` |
+
+**Errors**:
+| Status | When |
+|--------|------|
+| `400` | Invalid / missing phone |
+| `404` | No customer or no accessible quotation for this phone |
+| `500` | Server error |
+
+**Implementation** (`inventorybackend`):
+- Controller: `getQuotationCustomerByPhone` in `controllers/quotationController.ts`
+- Route: `routes/quotationRoutes.ts` → `GET /customer-by-phone`
+
+---
+
+### 4. Get Customer by Phone (from Sales) — Fallback
+
+**Endpoint**: `GET /api/sales/customer-by-phone?phone={mobile}`
+
+**Purpose**: If no quotation exists for the phone, prefill from the latest B2B/B2C sale.
+
+**Success response (200)**:
+```json
+{
+  "customer": {
+    "customer_name": "ABC Solar",
+    "customer_phone": "9876543210",
+    "customer_email": "abc@example.com",
+    "company_name": "ABC Solar Pvt Ltd",
+    "gst_number": "08ABCDE1234F1Z5",
+    "contact_person": "Ravi Sharma",
+    "billing_address": { "line1": "...", "city": "...", "state": "...", "postal_code": "...", "country": "India" },
+    "delivery_address": { "..." : "..." },
+    "delivery_matches_billing": true
+  },
+  "latest_sale": { "..." },
+  "recent_sales": [ "..." ]
+}
+```
+
+**404** if no sale found for phone.
+
+---
+
+## Frontend phone prefill flow (June 2026)
+
+```
+Agent types phone in B2C/B2B form → on 10th digit (auto)
+    ↓
+1. GET /api/quotations/customer-by-phone?phone=...
+    ↓ (if 404)
+2. GET /api/sales/customer-by-phone?phone=...
+    ↓
+Auto-fill name, email, billing + delivery address
+```
+
+Quotation dropdown still uses `GET /api/quotations/{id}` when agent picks a quotation explicitly.
 
 ---
 

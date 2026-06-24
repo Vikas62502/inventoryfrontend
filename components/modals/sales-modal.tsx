@@ -1,10 +1,10 @@
 "use client"
 
-import { useState, useEffect } from "react"
+import { useState, useEffect, useRef } from "react"
 import { Card } from "@/components/ui/card"
 import { Button } from "@/components/ui/button"
 import { X, Loader2, AlertCircle, Search } from "lucide-react"
-import { productsApi, salesApi, quotationsApi, serialNumbersApi, type Product, type SerialNumber, type Quotation, type Sale } from "@/lib/api"
+import { productsApi, salesApi, quotationsApi, serialNumbersApi, type Product, type SerialNumber, type Quotation, type CustomerPrefillProfile } from "@/lib/api"
 import AddressFields, { type Address } from "@/components/forms/address-fields"
 import { unitToFormSelectValue } from "@/lib/utils"
 
@@ -73,8 +73,9 @@ export default function SalesModal({ saleType, onClose, onSave, availableStock, 
   })
 
   const [notes, setNotes] = useState("")
-  const [customerHistoryLoaded, setCustomerHistoryLoaded] = useState(false)
-  const [customerHistory, setCustomerHistory] = useState<Sale[]>([])
+  const [prefillLoading, setPrefillLoading] = useState(false)
+  const [prefillHint, setPrefillHint] = useState("")
+  const lastPrefilledPhoneRef = useRef("")
 
   const filteredProducts = availableStock
     ? products.filter((product) => (availableStock[product.id] || 0) > 0)
@@ -88,57 +89,40 @@ export default function SalesModal({ saleType, onClose, onSave, availableStock, 
 
   const normalizePhone = (value: string): string => value.replace(/\D/g, "").slice(-10)
 
-  const hydrateAddress = (source?: Partial<Address> | null): Address => ({
-    line1: source?.line1 || "",
-    line2: source?.line2 || "",
-    city: source?.city || "",
-    state: source?.state || "",
-    postal_code: source?.postal_code || "",
-    country: source?.country || "",
-  })
-
-  const loadCustomerHistory = async (): Promise<Sale[]> => {
-    if (customerHistoryLoaded) return customerHistory
-    try {
-      const allSales = await salesApi.getAll()
-      setCustomerHistory(allSales)
-      setCustomerHistoryLoaded(true)
-      return allSales
-    } catch {
-      setCustomerHistoryLoaded(true)
-      return []
+  const hydrateAddress = (source?: Partial<Address> | Record<string, unknown> | null): Address => {
+    const s = (source || {}) as Record<string, unknown>
+    return {
+      line1: String(s.line1 || s.street || s.streetAddress || ""),
+      line2: String(s.line2 || ""),
+      city: String(s.city || ""),
+      state: String(s.state || ""),
+      postal_code: String(s.postal_code || s.pincode || ""),
+      country: String(s.country || "India"),
     }
   }
 
-  const prefillByPhone = async (phone: string, target: "b2b" | "b2c") => {
-    const normalized = normalizePhone(phone)
-    if (normalized.length < 10) return
-    const allSales = await loadCustomerHistory()
-    const latestMatch = allSales
-      .filter((sale) => normalizePhone(sale.customer_phone || "") === normalized)
-      .sort((a, b) => {
-        const da = new Date(a.created_at || 0).getTime()
-        const db = new Date(b.created_at || 0).getTime()
-        return db - da
-      })[0]
-
-    if (!latestMatch) return
-
-    const billing = hydrateAddress(latestMatch.billing_address)
-    const delivery = hydrateAddress(latestMatch.delivery_address)
-    const sameDelivery = latestMatch.delivery_matches_billing ?? true
+  const applyCustomerPrefill = (
+    profile: CustomerPrefillProfile,
+    target: "b2b" | "b2c",
+    overwrite = false
+  ) => {
+    const billing = hydrateAddress(profile.billing_address)
+    const delivery = hydrateAddress(profile.delivery_address)
+    const sameDelivery = profile.delivery_matches_billing ?? true
 
     if (target === "b2b") {
       setB2bFields((prev) => ({
         ...prev,
-        customer_name: prev.customer_name || latestMatch.customer_name || "",
-        company_name: prev.company_name || latestMatch.company_name || "",
-        gst_number: prev.gst_number || latestMatch.gst_number || "",
-        contact_person: prev.contact_person || latestMatch.contact_person || latestMatch.customer_name || "",
-        customer_email: prev.customer_email || latestMatch.customer_email || "",
-        customer_phone: prev.customer_phone || latestMatch.customer_phone || "",
-        billing_address: prev.billing_address.line1 ? prev.billing_address : billing,
-        delivery_address: prev.delivery_address.line1 ? prev.delivery_address : delivery,
+        customer_name: overwrite ? profile.customer_name || "" : prev.customer_name || profile.customer_name || "",
+        company_name: overwrite ? profile.company_name || "" : prev.company_name || profile.company_name || "",
+        gst_number: overwrite ? profile.gst_number || "" : prev.gst_number || profile.gst_number || "",
+        contact_person: overwrite
+          ? profile.contact_person || profile.customer_name || ""
+          : prev.contact_person || profile.contact_person || profile.customer_name || "",
+        customer_email: overwrite ? profile.customer_email || "" : prev.customer_email || profile.customer_email || "",
+        customer_phone: profile.customer_phone || prev.customer_phone,
+        billing_address: overwrite || !prev.billing_address.line1 ? billing : prev.billing_address,
+        delivery_address: overwrite || !prev.delivery_address.line1 ? delivery : prev.delivery_address,
         delivery_matches_billing: sameDelivery,
       }))
       return
@@ -146,13 +130,61 @@ export default function SalesModal({ saleType, onClose, onSave, availableStock, 
 
     setB2cFields((prev) => ({
       ...prev,
-      customer_name: prev.customer_name || latestMatch.customer_name || "",
-      customer_email: prev.customer_email || latestMatch.customer_email || "",
-      customer_phone: prev.customer_phone || latestMatch.customer_phone || "",
-      billing_address: prev.billing_address.line1 ? prev.billing_address : billing,
-      delivery_address: prev.delivery_address.line1 ? prev.delivery_address : delivery,
+      customer_name: overwrite ? profile.customer_name || "" : prev.customer_name || profile.customer_name || "",
+      customer_email: overwrite ? profile.customer_email || "" : prev.customer_email || profile.customer_email || "",
+      customer_phone: profile.customer_phone || prev.customer_phone,
+      billing_address: overwrite || !prev.billing_address.line1 ? billing : prev.billing_address,
+      delivery_address: overwrite || !prev.delivery_address.line1 ? delivery : prev.delivery_address,
       delivery_matches_billing: sameDelivery,
     }))
+  }
+
+  const prefillByPhone = async (phone: string, target: "b2b" | "b2c") => {
+    const normalized = normalizePhone(phone)
+    if (normalized.length < 10) return
+
+    setPrefillLoading(true)
+    setPrefillHint("")
+    try {
+      const fromQuotation = await quotationsApi.getCustomerByPhone(normalized)
+      if (fromQuotation?.customer) {
+        applyCustomerPrefill(fromQuotation.customer, target, true)
+        return
+      }
+
+      const fromSales = await salesApi.getCustomerByPhone(normalized)
+      if (fromSales?.customer) {
+        applyCustomerPrefill(fromSales.customer, target, true)
+        return
+      }
+
+      setPrefillHint("No customer found for this phone. Enter details manually.")
+    } catch (err: any) {
+      console.warn("Customer lookup failed:", err?.message || err)
+      setPrefillHint("Could not look up customer. Enter details manually.")
+    } finally {
+      setPrefillLoading(false)
+    }
+  }
+
+  const handlePhoneChange = (raw: string, target: "b2b" | "b2c") => {
+    if (target === "b2b") {
+      setB2bFields((prev) => ({ ...prev, customer_phone: raw }))
+    } else {
+      setB2cFields((prev) => ({ ...prev, customer_phone: raw }))
+    }
+
+    const normalized = normalizePhone(raw)
+    if (normalized.length < 10) {
+      lastPrefilledPhoneRef.current = ""
+      setPrefillHint("")
+      return
+    }
+
+    if (normalized !== lastPrefilledPhoneRef.current) {
+      lastPrefilledPhoneRef.current = normalized
+      void prefillByPhone(raw, target)
+    }
   }
 
   useEffect(() => {
@@ -216,6 +248,7 @@ export default function SalesModal({ saleType, onClose, onSave, availableStock, 
         delivery_matches_billing: false,
       })
       setSelectedQuotationId("")
+      lastPrefilledPhoneRef.current = ""
       return
     }
 
@@ -246,6 +279,7 @@ export default function SalesModal({ saleType, onClose, onSave, availableStock, 
         delivery_address: { ...billingAddress },
         delivery_matches_billing: true,
       })
+      lastPrefilledPhoneRef.current = normalizePhone(customerPhone)
       
       setSelectedQuotationId(quotationId)
     } catch (err: any) {
@@ -676,13 +710,18 @@ export default function SalesModal({ saleType, onClose, onSave, availableStock, 
                   <label className="block text-sm font-medium text-slate-300 mb-2">Phone</label>
                   <input
                     type="tel"
+                    inputMode="numeric"
+                    maxLength={15}
                     value={b2bFields.customer_phone}
-                    onChange={(e) => setB2bFields({ ...b2bFields, customer_phone: e.target.value })}
-                    onBlur={(e) => {
-                      void prefillByPhone(e.target.value, "b2b")
-                    }}
+                    onChange={(e) => handlePhoneChange(e.target.value, "b2b")}
                     className="w-full px-4 py-2 bg-slate-700 border border-slate-600 rounded-lg text-white focus:outline-none focus:border-blue-500"
                   />
+                  {prefillLoading && saleType === "b2b" && (
+                    <p className="text-xs text-blue-400 mt-1">Looking up customer details…</p>
+                  )}
+                  {!prefillLoading && prefillHint && saleType === "b2b" && (
+                    <p className="text-xs text-amber-400 mt-1">{prefillHint}</p>
+                  )}
                 </div>
               </div>
               
@@ -791,14 +830,19 @@ export default function SalesModal({ saleType, onClose, onSave, availableStock, 
                   <label className="block text-sm font-medium text-slate-300 mb-2">Phone *</label>
                   <input
                     type="tel"
+                    inputMode="numeric"
+                    maxLength={15}
                     value={b2cFields.customer_phone}
-                    onChange={(e) => setB2cFields({ ...b2cFields, customer_phone: e.target.value })}
-                    onBlur={(e) => {
-                      void prefillByPhone(e.target.value, "b2c")
-                    }}
+                    onChange={(e) => handlePhoneChange(e.target.value, "b2c")}
               className="w-full px-4 py-2 bg-slate-700 border border-slate-600 rounded-lg text-white focus:outline-none focus:border-blue-500"
               required
                   />
+                  {prefillLoading && saleType === "b2c" && (
+                    <p className="text-xs text-blue-400 mt-1">Looking up customer details…</p>
+                  )}
+                  {!prefillLoading && prefillHint && saleType === "b2c" && (
+                    <p className="text-xs text-amber-400 mt-1">{prefillHint}</p>
+                  )}
                 </div>
                 
                 <div className="sm:col-span-2">
