@@ -1160,14 +1160,7 @@ export default function ProductModal({ product, onClose, onSave }: ProductModalP
       
       // Add serial numbers if stock is being added (for editing existing products)
       if (product?.id && stockToAdd > 0) {
-        // Backend validation: stock_to_add cannot exceed current product quantity for "initial stock" scenario.
-        // When stockToAdd > existingStock, we batch into multiple API calls.
-        if (existingStock === 0) {
-          setError("Cannot add stock to a product with zero quantity. Please set initial quantity first.")
-          setLoading(false)
-          return
-        }
-        if (stockToAddPieces > existingStock && serialNumbers.length > 0) {
+        if (stockToAddPieces > existingStock && existingStock > 0 && serialNumbers.length > 0) {
           if (serialNumbers.length !== stockToAddPieces) {
             setError(`Please enter ${stockToAddPieces} serial numbers. Currently have ${serialNumbers.length}.`)
             setLoading(false)
@@ -1240,8 +1233,7 @@ export default function ProductModal({ product, onClose, onSave }: ProductModalP
 
       if (product?.id) {
         // Update existing product
-        // Backend: stock_to_add cannot exceed current product quantity. When stockToAdd > existingStock,
-        // batch into multiple API calls (add existingStock at a time, refetch, repeat).
+        // When stockToAdd > existingStock and existing stock > 0, batch into multiple API calls.
         const updateData: any = { ...productData }
         const needsFormData = productData.serial_numbers || imageFile || productData.stock_to_add !== undefined
         if (needsFormData) {
@@ -1255,7 +1247,7 @@ export default function ProductModal({ product, onClose, onSave }: ProductModalP
             let serialOffset = 0
 
             while (remainingToAdd > 0) {
-              const chunk = Math.min(remainingToAdd, currentStock)
+              const chunk = currentStock > 0 ? Math.min(remainingToAdd, currentStock) : remainingToAdd
               if (chunk <= 0 && remainingToAdd > 0) {
                 setError("Cannot add stock: backend requires stock_to_add <= current quantity. Please add in smaller batches.")
                 setLoading(false)
