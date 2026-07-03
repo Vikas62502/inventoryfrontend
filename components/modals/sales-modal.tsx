@@ -593,20 +593,27 @@ export default function SalesModal({ saleType, onClose, onSave, availableStock, 
       onSave(created)
       onClose()
     } catch (err: any) {
-      const errorDetails = err?.data?.details
-      if (Array.isArray(errorDetails) && errorDetails.length > 0) {
-        const detailMessage = errorDetails
-          .map((detail: any) => {
-            if (detail?.path && detail?.message) {
-              return `${detail.path}: ${detail.message}`
-            }
-            if (detail?.message) return detail.message
-            return typeof detail === "string" ? detail : JSON.stringify(detail)
-          })
-          .join(", ")
-        setError(detailMessage || err.message || "Failed to create sale")
+      const rawMessage = typeof err?.message === "string" ? err.message : ""
+      if (/character varying\(\d+\)|value too long/i.test(rawMessage)) {
+        setError(
+          "Sale could not be saved: product list or image is too long. Try fewer products or re-upload the image.",
+        )
       } else {
-      setError(err.message || "Failed to create sale")
+        const errorDetails = err?.data?.details
+        if (Array.isArray(errorDetails) && errorDetails.length > 0) {
+          const detailMessage = errorDetails
+            .map((detail: any) => {
+              if (detail?.path && detail?.message) {
+                return `${detail.path}: ${detail.message}`
+              }
+              if (detail?.message) return detail.message
+              return typeof detail === "string" ? detail : JSON.stringify(detail)
+            })
+            .join(", ")
+          setError(detailMessage || err.message || "Failed to create sale")
+        } else {
+          setError(err.message || "Failed to create sale")
+        }
       }
       setIsSubmitting(false)
     }
