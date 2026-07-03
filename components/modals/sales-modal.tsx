@@ -6,7 +6,7 @@ import { Button } from "@/components/ui/button"
 import { X, Loader2, AlertCircle, Search } from "lucide-react"
 import { productsApi, salesApi, quotationsApi, serialNumbersApi, type Product, type SerialNumber, type Quotation, type CustomerPrefillProfile } from "@/lib/api"
 import AddressFields, { type Address } from "@/components/forms/address-fields"
-import { unitToFormSelectValue } from "@/lib/utils"
+import { unitToFormSelectValue, normalizeSaleQuantity, isWholeSaleQuantity, hasSufficientStock, parseDecimalInput, SALE_QUANTITY_DECIMALS } from "@/lib/utils"
 
 interface SalesModalProps {
   saleType: "b2b" | "b2c"
@@ -311,12 +311,19 @@ export default function SalesModal({ saleType, onClose, onSave, availableStock, 
     const updated = [...items]
     updated[index] = { ...updated[index], [field]: value }
     
-    // When quantity decreases, trim selected serials to match
-    if (field === "quantity" && typeof value === "number") {
+    // When quantity decreases, trim selected serials to match (whole numbers only)
+    if (field === "quantity" && typeof value === "number" && isWholeSaleQuantity(value)) {
       const current = selectedSerialsPerItem[index] || []
-      if (current.length > value) {
-        setSelectedSerialsPerItem(prev => ({ ...prev, [index]: current.slice(0, value) }))
+      const maxSerials = Math.round(value)
+      if (current.length > maxSerials) {
+        setSelectedSerialsPerItem(prev => ({ ...prev, [index]: current.slice(0, maxSerials) }))
       }
+    } else if (field === "quantity" && typeof value === "number" && !isWholeSaleQuantity(value)) {
+      setSelectedSerialsPerItem(prev => {
+        const next = { ...prev }
+        delete next[index]
+        return next
+      })
     }
     
     // Auto-fill unit price from product (use selling_price for sales, else cost/unit_price)
@@ -357,14 +364,16 @@ export default function SalesModal({ saleType, onClose, onSave, availableStock, 
 
   const toggleSerialForItem = (itemIndex: number, serialNumber: string) => {
     const item = items[itemIndex]
-    if (!item || !item.product_id || item.quantity <= 0) return
+    const qty = normalizeSaleQuantity(item?.quantity)
+    if (!item || !item.product_id || qty <= 0 || !isWholeSaleQuantity(qty)) return
+    const maxSerials = Math.round(qty)
     const current = selectedSerialsPerItem[itemIndex] || []
     const isSelected = current.includes(serialNumber)
     let next: string[]
     if (isSelected) {
       next = current.filter(s => s !== serialNumber)
     } else {
-      if (current.length >= item.quantity) return // Already at max
+      if (current.length >= maxSerials) return
       next = [...current, serialNumber]
     }
     setSelectedSerialsPerItem(prev => ({ ...prev, [itemIndex]: next }))
@@ -408,13 +417,15 @@ export default function SalesModal({ saleType, onClose, onSave, availableStock, 
     }
 
     const normalizedItems = items.map((item, idx) => {
-      const quantity = Number(item.quantity)
-      const unit_price = Number(item.unit_price)
+      const quantity = normalizeSaleQuantity(item.quantity)
+      const unit_price = Math.round(parseDecimalInput(String(item.unit_price)) * 100) / 100
       const gst_rate = Number(item.gst_rate ?? 0)
       const subtotal = Number.isFinite(quantity) && Number.isFinite(unit_price)
         ? quantity * unit_price
         : 0
-      const serial_numbers = adminId ? (selectedSerialsPerItem[idx] || []).filter(Boolean) : undefined
+      const serial_numbers = adminId && isWholeSaleQuantity(quantity)
+        ? (selectedSerialsPerItem[idx] || []).filter(Boolean)
+        : undefined
       const payload: any = {
         product_id: (item.product_id || "").trim(),
         quantity,
@@ -434,7 +445,6 @@ export default function SalesModal({ saleType, onClose, onSave, availableStock, 
           !item.product_id ||
           !Number.isFinite(item.quantity) ||
           item.quantity <= 0 ||
-          !Number.isInteger(item.quantity) ||
           !Number.isFinite(item.unit_price) ||
           item.unit_price <= 0 ||
           !Number.isFinite(item.gst_rate) ||
@@ -449,7 +459,7 @@ export default function SalesModal({ saleType, onClose, onSave, availableStock, 
     if (availableStock) {
       for (const item of normalizedItems) {
         const availableQty = availableStock[item.product_id] || 0
-        if (item.quantity > availableQty) {
+        if (!hasSufficientStock(availableQty, item.quantity)) {
           const product = products.find(p => p.id === item.product_id)
           const stockUnit = getProductStockUnit(item.product_id)
           const productLabel = product
@@ -465,12 +475,20 @@ export default function SalesModal({ saleType, onClose, onSave, availableStock, 
     if (adminId) {
       for (let idx = 0; idx < items.length; idx++) {
         const item = items[idx]
+        const qty = normalizeSaleQuantity(item.quantity)
         const selected = selectedSerialsPerItem[idx] || []
-        if (selected.length > 0 && selected.length !== item.quantity) {
-          const product = products.find(p => p.id === item.product_id)
-          const productLabel = product?.name || "Product"
-          setError(`${productLabel}: Selected ${selected.length} serial(s) but quantity is ${item.quantity}. Select exactly ${item.quantity} or clear selection.`)
-          return
+        if (selected.length > 0) {
+          if (!isWholeSaleQuantity(qty)) {
+            const product = products.find(p => p.id === item.product_id)
+            setError(`${product?.name || "Product"}: Serial numbers require a whole-number quantity.`)
+            return
+          }
+          if (selected.length !== Math.round(qty)) {
+            const product = products.find(p => p.id === item.product_id)
+            const productLabel = product?.name || "Product"
+            setError(`${productLabel}: Selected ${selected.length} serial(s) but quantity is ${qty}. Select exactly ${Math.round(qty)} or clear selection.`)
+            return
+          }
         }
       }
     }
@@ -954,13 +972,20 @@ export default function SalesModal({ saleType, onClose, onSave, availableStock, 
                       type="number"
                       value={item.quantity || ""}
                       onChange={(e) => {
-                        const raw = parseInt(e.target.value) || 0
+                        const raw = parseDecimalInput(e.target.value)
+                        const normalized = normalizeSaleQuantity(raw)
                         const maxQty = availableStock?.[item.product_id]
-                        const nextQty = maxQty ? Math.min(raw, maxQty) : raw
+                        const nextQty =
+                          maxQty !== undefined && Number.isFinite(maxQty)
+                            ? hasSufficientStock(maxQty, normalized)
+                              ? normalized
+                              : normalizeSaleQuantity(maxQty)
+                            : normalized
                         updateItem(index, "quantity", nextQty)
                       }}
                       placeholder={qtyUnit}
-                      min="1"
+                      min="0.001"
+                      step={10 ** -SALE_QUANTITY_DECIMALS}
                       max={availableStock?.[item.product_id]}
                       className="w-full px-3 sm:px-4 py-2 bg-slate-700 border border-slate-600 rounded-lg text-white focus:outline-none focus:border-blue-500 text-sm sm:text-base"
                       required
@@ -1001,6 +1026,10 @@ export default function SalesModal({ saleType, onClose, onSave, availableStock, 
                       {item.quantity <= 0 ? (
                         <p className="text-xs text-slate-400">
                           Enter quantity above to select serial numbers for this sale.
+                        </p>
+                      ) : !isWholeSaleQuantity(normalizeSaleQuantity(item.quantity)) ? (
+                        <p className="text-xs text-amber-400">
+                          Serial numbers apply to whole quantities only (e.g. 2, not 2.5).
                         </p>
                       ) : loadingSerialsForProduct === item.product_id ? (
                         <p className="text-xs text-slate-400 flex items-center gap-1">

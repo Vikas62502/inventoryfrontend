@@ -89,6 +89,37 @@ export function parseDecimalInput(value: string): number {
   return Number.isFinite(parsed) ? parsed : 0
 }
 
+/** Max decimal places for B2B/B2C sale line quantities (e.g. 2.5). */
+export const SALE_QUANTITY_DECIMALS = 3
+
+export function normalizeSaleQuantity(value: unknown): number {
+  const n = Number(value)
+  if (!Number.isFinite(n)) return NaN
+  const factor = 10 ** SALE_QUANTITY_DECIMALS
+  return Math.round(n * factor) / factor
+}
+
+export function isWholeSaleQuantity(value: number): boolean {
+  if (!Number.isFinite(value)) return false
+  return Math.abs(value - Math.round(value)) < 1e-6
+}
+
+export function formatSaleQuantity(value: unknown): string {
+  const n = normalizeSaleQuantity(value)
+  if (!Number.isFinite(n)) return "0"
+  return n.toLocaleString("en-IN", {
+    minimumFractionDigits: 0,
+    maximumFractionDigits: SALE_QUANTITY_DECIMALS,
+  })
+}
+
+export function hasSufficientStock(available: number, requested: number): boolean {
+  const a = normalizeSaleQuantity(available)
+  const r = normalizeSaleQuantity(requested)
+  if (!Number.isFinite(a) || !Number.isFinite(r)) return false
+  return a + 1e-6 >= r
+}
+
 export function isKilogramUnit(unit: string | undefined | null): boolean {
   const u = (unit || "").trim().toLowerCase()
   return u === "kgs" || u === "kg" || u === "kilograms" || u === "kilogram"

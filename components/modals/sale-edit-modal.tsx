@@ -6,6 +6,7 @@ import { Button } from "@/components/ui/button"
 import { X, Loader2, AlertCircle, Search } from "lucide-react"
 import { salesApi, productsApi, type Sale, type Product } from "@/lib/api"
 import AddressFields, { type Address } from "@/components/forms/address-fields"
+import { normalizeSaleQuantity, isWholeSaleQuantity, hasSufficientStock, parseDecimalInput, SALE_QUANTITY_DECIMALS } from "@/lib/utils"
 
 interface SaleEditModalProps {
   saleId: string
@@ -152,13 +153,15 @@ export default function SaleEditModal({
     const normalizedItems = items
       .filter((i) => i.product_id)
       .map((item) => {
+        const quantity = normalizeSaleQuantity(item.quantity)
+        const unit_price = Math.round(parseDecimalInput(String(item.unit_price)) * 100) / 100
         const payload: any = {
           product_id: item.product_id,
-          quantity: Number(item.quantity) || 0,
-          unit_price: Number(item.unit_price) || 0,
+          quantity,
+          unit_price,
           gst_rate: Number(item.gst_rate) ?? 0,
         }
-        if (item.serial_numbers && item.serial_numbers.length > 0) {
+        if (item.serial_numbers && item.serial_numbers.length > 0 && isWholeSaleQuantity(quantity)) {
           payload.serial_numbers = item.serial_numbers
         }
         return payload
@@ -379,12 +382,19 @@ export default function SaleEditModal({
                       type="number"
                       value={item.quantity || ""}
                       onChange={(e) => {
-                        const raw = parseInt(e.target.value) || 0
+                        const normalized = normalizeSaleQuantity(parseDecimalInput(e.target.value))
                         const maxQty = availableStock?.[item.product_id]
-                        updateItem(index, "quantity", maxQty ? Math.min(raw, maxQty) : raw)
+                        const nextQty =
+                          maxQty !== undefined && Number.isFinite(maxQty)
+                            ? hasSufficientStock(maxQty, normalized)
+                              ? normalized
+                              : normalizeSaleQuantity(maxQty)
+                            : normalized
+                        updateItem(index, "quantity", nextQty)
                       }}
                       placeholder="Qty"
-                      min="1"
+                      min="0.001"
+                      step={10 ** -SALE_QUANTITY_DECIMALS}
                       className="w-full px-3 py-2 bg-slate-700 border border-slate-600 rounded-lg text-white focus:outline-none focus:border-blue-500"
                     />
                     <input
