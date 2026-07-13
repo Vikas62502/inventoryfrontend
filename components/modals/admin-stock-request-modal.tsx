@@ -11,12 +11,17 @@ interface AdminStockRequestModalProps {
   onClose: () => void
   onSuccess: () => void
   requestType: "super-admin" | "admin-transfer" // Request from super-admin or transfer to another admin
+  /** When super-admin creates a request for a specific admin */
+  onBehalfOfAdminId?: string
+  onBehalfOfAdminName?: string
 }
 
 export default function AdminStockRequestModal({
   onClose,
   onSuccess,
   requestType,
+  onBehalfOfAdminId,
+  onBehalfOfAdminName,
 }: AdminStockRequestModalProps) {
   const [products, setProducts] = useState<Product[]>([])
   const [admins, setAdmins] = useState<User[]>([])
@@ -95,7 +100,10 @@ export default function AdminStockRequestModal({
           notes ||
           (requestType === "admin-transfer"
             ? `Stock transfer to admin: ${admins.find((a) => a.id === selectedAdminId)?.name || ""}`
-            : "Stock request from admin"),
+            : onBehalfOfAdminId
+              ? `Stock request on behalf of admin: ${onBehalfOfAdminName || onBehalfOfAdminId}`
+              : "Stock request from admin"),
+        ...(onBehalfOfAdminId ? { on_behalf_of_admin_id: onBehalfOfAdminId } : {}),
       })
 
       onSuccess()
@@ -188,7 +196,11 @@ export default function AdminStockRequestModal({
       <Card className="bg-slate-800 border-slate-700 p-4 sm:p-6 lg:p-8 max-w-[95%] sm:max-w-xl md:max-w-2xl w-full my-4 sm:my-8 max-h-[95vh] overflow-y-auto">
         <div className="flex items-center justify-between mb-4 sm:mb-6 sticky top-0 bg-slate-800 pb-4 z-10">
           <h2 className="text-xl sm:text-2xl font-bold text-white">
-            {requestType === "super-admin" ? "Request Stock from Super Admin" : "Transfer Stock to Admin"}
+            {requestType === "super-admin"
+              ? onBehalfOfAdminName
+                ? `Request Stock for ${onBehalfOfAdminName}`
+                : "Request Stock from Super Admin"
+              : "Transfer Stock to Admin"}
           </h2>
           <button onClick={onClose} className="text-slate-400 hover:text-white transition flex-shrink-0 ml-2">
             <X className="w-5 h-5 sm:w-6 sm:h-6" />

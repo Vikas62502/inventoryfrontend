@@ -11,6 +11,8 @@ interface CreateUserModalProps {
   onSuccess: () => void
   creatorRole: "super-admin" | "admin" // Who is creating the user
   targetRole?: "admin" | "agent" | "super-admin-manager" | "account" // Optional: specify which role to create
+  /** When super-admin creates an agent under a specific admin */
+  createdById?: string
 }
 
 export default function CreateUserModal({
@@ -18,6 +20,7 @@ export default function CreateUserModal({
   onSuccess,
   creatorRole,
   targetRole: propTargetRole,
+  createdById,
 }: CreateUserModalProps) {
   const [formData, setFormData] = useState({
     username: "",
@@ -68,6 +71,9 @@ export default function CreateUserModal({
         role: targetRole,
         // If admin is creating an agent, set is_active to false for super-admin approval
         ...(creatorRole === "admin" && targetRole === "agent" ? { is_active: false } : {}),
+        ...(creatorRole === "super-admin" && targetRole === "agent" && createdById
+          ? { created_by_id: createdById }
+          : {}),
       })
 
       onSuccess()

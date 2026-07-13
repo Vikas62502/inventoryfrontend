@@ -7,6 +7,7 @@ import { X, Loader2, AlertCircle, Search } from "lucide-react"
 import { productsApi, salesApi, quotationsApi, serialNumbersApi, type Product, type SerialNumber, type Quotation, type CustomerPrefillProfile } from "@/lib/api"
 import AddressFields, { type Address } from "@/components/forms/address-fields"
 import { unitToFormSelectValue, normalizeSaleQuantity, isWholeSaleQuantity, hasSufficientStock, parseDecimalInput, SALE_QUANTITY_DECIMALS } from "@/lib/utils"
+import type { TallyImportPrefill } from "@/lib/tally-json-import"
 
 interface SalesModalProps {
   saleType: "b2b" | "b2c"
@@ -15,9 +16,11 @@ interface SalesModalProps {
   availableStock?: Record<string, number>
   /** Agent's admin ID – when provided, enables serial number selection from admin's mapped serials */
   adminId?: string
+  /** Prefill from Tally JSON import or other sources */
+  prefill?: TallyImportPrefill | null
 }
 
-export default function SalesModal({ saleType, onClose, onSave, availableStock, adminId }: SalesModalProps) {
+export default function SalesModal({ saleType, onClose, onSave, availableStock, adminId, prefill }: SalesModalProps) {
   const [products, setProducts] = useState<Product[]>([])
   const [quotations, setQuotations] = useState<Quotation[]>([])
   const [loading, setLoading] = useState(true)
@@ -200,6 +203,49 @@ export default function SalesModal({ saleType, onClose, onSave, availableStock, 
     }
     loadProducts()
   }, [])
+
+  useEffect(() => {
+    if (!prefill) return
+
+    if (prefill.items.length > 0) {
+      setItems(
+        prefill.items.map((item) => ({
+          product_id: item.product_id,
+          quantity: item.quantity,
+          unit_price: item.unit_price,
+          gst_rate: item.gst_rate,
+        }))
+      )
+    }
+
+    if (saleType === "b2b") {
+      setB2bFields((prev) => ({
+        ...prev,
+        customer_name: prefill.customerName || prev.customer_name,
+        company_name: prefill.companyName || prefill.customerName || prev.company_name,
+        gst_number: prefill.gstNumber || prev.gst_number,
+        contact_person: prefill.contactPerson || prefill.customerName || prev.contact_person,
+        customer_email: prefill.customerEmail || prev.customer_email,
+        customer_phone: prefill.customerPhone || prev.customer_phone,
+        billing_address: prefill.billingAddress.line1 ? prefill.billingAddress : prev.billing_address,
+        delivery_address: prefill.deliveryAddress.line1 ? prefill.deliveryAddress : prev.delivery_address,
+        delivery_matches_billing: prefill.deliveryMatchesBilling,
+      }))
+    } else {
+      setB2cFields((prev) => ({
+        ...prev,
+        customer_name: prefill.customerName || prev.customer_name,
+        customer_email: prefill.customerEmail || prev.customer_email,
+        customer_phone: prefill.customerPhone || prev.customer_phone,
+        billing_address: prefill.billingAddress.line1 ? prefill.billingAddress : prev.billing_address,
+        delivery_address: prefill.deliveryAddress.line1 ? prefill.deliveryAddress : prev.delivery_address,
+        delivery_matches_billing: prefill.deliveryMatchesBilling,
+      }))
+    }
+
+    if (prefill.notes) setNotes(prefill.notes)
+    if (prefill.customerPhone) lastPrefilledPhoneRef.current = prefill.customerPhone.replace(/\D/g, "").slice(-10)
+  }, [prefill, saleType])
 
 
 
@@ -592,7 +638,12 @@ export default function SalesModal({ saleType, onClose, onSave, availableStock, 
         return msg.toLowerCase().includes("items") && msg.toLowerCase().includes("invalid")
       }
 
-      const submitWithItems = (itemsPayload: any) => salesApi.create({ ...baseSaleData, items: itemsPayload })
+      const submitWithItems = (itemsPayload: any) =>
+        salesApi.create({
+          ...baseSaleData,
+          items: itemsPayload,
+          ...(adminId ? { admin_id: adminId } : {}),
+        })
 
       // Prefer array payload, fallback to single object if backend expects it
       const primaryItemsPayload = normalizedItems
@@ -656,9 +707,14 @@ export default function SalesModal({ saleType, onClose, onSave, availableStock, 
     <div className="fixed inset-0 bg-black/50 backdrop-blur-sm flex items-center justify-center p-2 sm:p-4 z-50">
       <Card className="bg-slate-800 border-slate-700 p-4 sm:p-6 lg:p-8 max-w-[95%] sm:max-w-xl md:max-w-2xl w-full my-4 sm:my-8 max-h-[95vh] overflow-y-auto">
         <div className="flex items-center justify-between mb-4 sm:mb-6 sticky top-0 bg-slate-800 pb-4 z-10">
-          <h2 className="text-xl sm:text-2xl font-bold text-white">
-            {saleType === "b2b" ? "Create B2B Sale" : "Create B2C Sale"}
-          </h2>
+          <div>
+            <h2 className="text-xl sm:text-2xl font-bold text-white">
+              {saleType === "b2b" ? "Create B2B Sale" : "Create B2C Sale"}
+            </h2>
+            {prefill && (
+              <p className="text-xs text-amber-400 mt-1">Prefilled from Tally JSON — review and edit before saving</p>
+            )}
+          </div>
           <button onClick={onClose} className="text-slate-400 hover:text-white transition flex-shrink-0 ml-2">
             <X className="w-5 h-5 sm:w-6 sm:h-6" />
           </button>

@@ -5,9 +5,11 @@ import { Card } from "@/components/ui/card"
 import { Button } from "@/components/ui/button"
 import { Plus, Edit2, Trash2, Package, Search, TrendingUp, AlertCircle, Loader2, UserPlus, Users, CheckCircle, XCircle, RotateCcw, DollarSign, Eye, ShoppingCart, Download } from "lucide-react"
 import ProductModal from "@/components/modals/product-modal"
+import SerialNumbersViewModal from "@/components/modals/serial-numbers-view-modal"
 import EnhancedRequestApprovalModal from "@/components/modals/enhanced-request-approval-modal"
 import CreateUserModal from "@/components/modals/create-user-modal"
 import SaleEditModal from "@/components/modals/sale-edit-modal"
+import SuperAdminOpsPanels from "@/components/dashboards/sections/super-admin-ops-panels"
 import { Tabs, TabsList, TabsTrigger, TabsContent } from "@/components/ui/tabs"
 import { useInventoryState } from "@/hooks/use-inventory-state"
 import { useStockRequestsState } from "@/hooks/use-stock-requests-state"
@@ -34,6 +36,7 @@ export default function SuperAdminDashboard({ userName }: SuperAdminDashboardPro
   const [showProductModal, setShowProductModal] = useState(false)
   const [openSerialNumbersOnMount, setOpenSerialNumbersOnMount] = useState(false)
   const [recentlyCreatedSerials, setRecentlyCreatedSerials] = useState<Record<string, string[]>>({})
+  const [serialNumbersProduct, setSerialNumbersProduct] = useState<{ id: string; name: string } | null>(null)
   const [showApprovalModal, setShowApprovalModal] = useState(false)
   const [showCreateUserModal, setShowCreateUserModal] = useState(false)
   const [createUserTargetRole, setCreateUserTargetRole] = useState<"admin" | "super-admin-manager" | "account">("admin")
@@ -415,19 +418,25 @@ export default function SuperAdminDashboard({ userName }: SuperAdminDashboardPro
     return matchesSearch && matchesCategory
   })
 
+  // ProductModal already persists via productsApi; parent only refreshes catalog.
   const handleAddProduct = async (product: Product | Omit<Product, "id">) => {
     try {
-      await inventory.addProduct(product as any)
-      await inventory.refetch()
-      // Store serial numbers for products we just created (for View All fallback when backend has not synced yet)
       if ("id" in product && product.id && (product as Product).serial_numbers?.length) {
-        setRecentlyCreatedSerials((prev) => ({ ...prev, [product.id]: (product as Product).serial_numbers! }))
+        setRecentlyCreatedSerials((prev) => ({
+          ...prev,
+          [product.id]: (product as Product).serial_numbers!,
+        }))
       }
-      setShowProductModal(false)
-      setEditingProduct(null)
+      await inventory.refetch()
     } catch (err) {
-      console.error("Failed to save product:", err)
+      console.error("Failed to refresh products after save:", err)
     }
+  }
+
+  const handleProductModalClose = () => {
+    setShowProductModal(false)
+    setEditingProduct(null)
+    setOpenSerialNumbersOnMount(false)
   }
 
   const handleDeleteProduct = async (id: string) => {
@@ -592,7 +601,7 @@ export default function SuperAdminDashboard({ userName }: SuperAdminDashboardPro
       {/* Tabs Navigation */}
       <Tabs value={activeTab} onValueChange={setActiveTab} className="w-full">
         <div className="w-full mb-6 sm:mb-8 bg-slate-900 rounded-lg p-1">
-          <TabsList className="bg-slate-900 border-0 p-0 w-full grid grid-cols-2 md:grid-cols-6 gap-2">
+          <TabsList className="bg-slate-900 border-0 p-0 w-full grid grid-cols-2 md:grid-cols-4 lg:grid-cols-8 gap-2">
             <TabsTrigger value="overview" className="data-[state=active]:bg-blue-600 data-[state=active]:text-white text-slate-300 bg-slate-800 hover:bg-slate-700 text-[11px] sm:text-xs px-3 py-2 rounded-md transition-all flex items-center justify-center">
               <Package className="w-3.5 h-3.5 sm:w-4 sm:h-4 mr-1.5" />
               <span>Overview</span>
@@ -604,6 +613,14 @@ export default function SuperAdminDashboard({ userName }: SuperAdminDashboardPro
             <TabsTrigger value="approvals" className="data-[state=active]:bg-cyan-600 data-[state=active]:text-white text-slate-300 bg-slate-800 hover:bg-slate-700 text-[11px] sm:text-xs px-3 py-2 rounded-md transition-all flex items-center justify-center">
               <CheckCircle className="w-3.5 h-3.5 sm:w-4 sm:h-4 mr-1.5" />
               <span>Approvals</span>
+            </TabsTrigger>
+            <TabsTrigger value="agent" className="data-[state=active]:bg-indigo-600 data-[state=active]:text-white text-slate-300 bg-slate-800 hover:bg-slate-700 text-[11px] sm:text-xs px-3 py-2 rounded-md transition-all flex items-center justify-center">
+              <ShoppingCart className="w-3.5 h-3.5 sm:w-4 sm:h-4 mr-1.5" />
+              <span>Agent</span>
+            </TabsTrigger>
+            <TabsTrigger value="admin" className="data-[state=active]:bg-green-600 data-[state=active]:text-white text-slate-300 bg-slate-800 hover:bg-slate-700 text-[11px] sm:text-xs px-3 py-2 rounded-md transition-all flex items-center justify-center">
+              <Users className="w-3.5 h-3.5 sm:w-4 sm:h-4 mr-1.5" />
+              <span>Admin</span>
             </TabsTrigger>
             <TabsTrigger value="returns" className="data-[state=active]:bg-orange-600 data-[state=active]:text-white text-slate-300 bg-slate-800 hover:bg-slate-700 text-[11px] sm:text-xs px-3 py-2 rounded-md transition-all flex items-center justify-center">
               <RotateCcw className="w-3.5 h-3.5 sm:w-4 sm:h-4 mr-1.5" />
@@ -1319,6 +1336,28 @@ export default function SuperAdminDashboard({ userName }: SuperAdminDashboardPro
           </div>
         </TabsContent>
 
+        <TabsContent value="agent" className="mt-[60px] md:mt-0">
+          <SuperAdminOpsPanels
+            panel="agent"
+            admins={admins}
+            allAgents={allAgents}
+            onAgentsChanged={() => {
+              void loadPendingAgents()
+            }}
+          />
+        </TabsContent>
+
+        <TabsContent value="admin" className="mt-[60px] md:mt-0">
+          <SuperAdminOpsPanels
+            panel="admin"
+            admins={admins}
+            allAgents={allAgents}
+            onAgentsChanged={() => {
+              void loadPendingAgents()
+            }}
+          />
+        </TabsContent>
+
         <TabsContent value="returns" className="mt-[60px] md:mt-0">
           {/* Stock Returns Section */}
           {sortedStockReturns.length > 0 ? (
@@ -1517,9 +1556,10 @@ export default function SuperAdminDashboard({ userName }: SuperAdminDashboardPro
                         <Button
                           type="button"
                           onClick={() => {
-                            setEditingProduct(product as Product)
-                            setOpenSerialNumbersOnMount(true)
-                            setShowProductModal(true)
+                            setSerialNumbersProduct({
+                              id: product.id,
+                              name: product.name,
+                            })
                           }}
                           size="sm"
                           variant="outline"
@@ -2053,17 +2093,22 @@ export default function SuperAdminDashboard({ userName }: SuperAdminDashboardPro
             editingProduct
               ? {
                   ...editingProduct,
-                  serial_numbers: editingProduct.serial_numbers ?? recentlyCreatedSerials[editingProduct.id],
+                  serial_numbers:
+                    editingProduct.serial_numbers ??
+                    recentlyCreatedSerials[editingProduct.id],
                 }
               : undefined
           }
-          onClose={() => {
-            setShowProductModal(false)
-            setEditingProduct(null)
-            setOpenSerialNumbersOnMount(false)
-          }}
+          onClose={handleProductModalClose}
           onSave={handleAddProduct}
-          openSerialNumbersOnMount={openSerialNumbersOnMount}
+        />
+      )}
+
+      {serialNumbersProduct && (
+        <SerialNumbersViewModal
+          productId={serialNumbersProduct.id}
+          productName={serialNumbersProduct.name}
+          onClose={() => setSerialNumbersProduct(null)}
         />
       )}
 

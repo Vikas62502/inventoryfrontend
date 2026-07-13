@@ -4,7 +4,7 @@ import { useState, useEffect, useRef } from "react"
 import { Card } from "@/components/ui/card"
 import { Button } from "@/components/ui/button"
 import { Checkbox } from "@/components/ui/checkbox"
-import { X, Loader2, AlertCircle, Eye, Camera, CameraOff, DollarSign, ChevronDown, ChevronUp, Search } from "lucide-react"
+import { X, Loader2, AlertCircle, Eye, Camera, CameraOff, DollarSign, ChevronDown, ChevronUp, Search, Upload, FileJson, Plus, Trash2 } from "lucide-react"
 import { Html5Qrcode } from "html5-qrcode"
 import { productsApi, categoriesApi, serialNumbersApi, type SerialNumber } from "@/lib/api"
 import type { Product } from "@/lib/api"
@@ -20,7 +20,15 @@ import {
   convertPiecePriceToKgPrice,
   unitToFormSelectValue,
   isSerialRequiredForDispatch,
+  formatSaleQuantity,
 } from "@/lib/utils"
+import {
+  parseTallyPurchaseJson,
+  resolvePurchaseLineProduct,
+  TALLY_PURCHASE_CATEGORIES,
+  type TallyPurchaseImportResult,
+  type TallyPurchaseLineItem,
+} from "@/lib/tally-purchase-import"
 
 interface ProductModalProps {
   product?: Product | null
@@ -28,10 +36,41 @@ interface ProductModalProps {
   onSave: (product: Product | Omit<Product, "id">) => void
 }
 
+type ManualProductDraft = {
+  key: string
+  category: string
+  name: string
+  model: string
+  wattage: string
+  quantity: string
+  unit: string
+  costPrice: string
+  serialNumbersText: string
+}
+
+const createEmptyManualDraft = (): ManualProductDraft => ({
+  key: `row-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
+  category: "",
+  name: "",
+  model: "",
+  wattage: "",
+  quantity: "",
+  unit: "Quantity",
+  costPrice: "",
+  serialNumbersText: "",
+})
+
+const parseManualSerials = (text: string): string[] =>
+  text
+    .split(/[\n,]+/)
+    .map((s) => s.trim())
+    .filter(Boolean)
+
 export default function ProductModal({ product, onClose, onSave }: ProductModalProps) {
   // Component for adding/editing products
   const [categories, setCategories] = useState<string[]>([])
   const [products, setProducts] = useState<Product[]>([])
+  const [apiProducts, setApiProducts] = useState<Product[]>([])
   const [referenceData, setReferenceData] = useState<any[]>([])
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState<string | null>(null)
@@ -230,6 +269,18 @@ export default function ProductModal({ product, onClose, onSave }: ProductModalP
   // Step tracking for new product creation
   const [currentStep, setCurrentStep] = useState<1 | 2>(1)
   const [createdProductId, setCreatedProductId] = useState<string | null>(null)
+
+  const purchaseFileInputRef = useRef<HTMLInputElement>(null)
+  const [purchaseImport, setPurchaseImport] = useState<TallyPurchaseImportResult | null>(null)
+  const [purchaseFileName, setPurchaseFileName] = useState<string | null>(null)
+  const [selectedPurchaseLineIndex, setSelectedPurchaseLineIndex] = useState(0)
+  const [purchaseLineChecked, setPurchaseLineChecked] = useState<Record<number, boolean>>({})
+  const [applyingAllPurchase, setApplyingAllPurchase] = useState(false)
+  const [purchaseApplyProgress, setPurchaseApplyProgress] = useState<string | null>(null)
+  const [purchaseImportSuccess, setPurchaseImportSuccess] = useState<string | null>(null)
+  const [manualDrafts, setManualDrafts] = useState<ManualProductDraft[]>([createEmptyManualDraft()])
+  const [savingManualBatch, setSavingManualBatch] = useState(false)
+  const [manualBatchProgress, setManualBatchProgress] = useState<string | null>(null)
   
   // Assigned serial numbers (for edit mode)
   const [assignedSerialNumbers, setAssignedSerialNumbers] = useState<SerialNumber[]>([])
@@ -294,6 +345,7 @@ export default function ProductModal({ product, onClose, onSave }: ProductModalP
           !apiProducts.some(ap => ap.id === rp.id || ap.name === rp.name)
         )]
         setProducts(allProducts)
+        setApiProducts(apiProducts)
       } catch (err) {
         console.error("Failed to load data:", err)
       }
@@ -884,6 +936,415 @@ export default function ProductModal({ product, onClose, onSave }: ProductModalP
     }
   }
 
+  const ensureCategoryExists = async (categoryName: string) => {
+    if (!categoryName || categories.includes(categoryName)) return
+    try {
+      await categoriesApi.create(categoryName)
+      const updatedCats = await categoriesApi.getAll()
+      const sortedCategories = [...updatedCats].sort((a: any, b: any) => {
+        const dateA = a.created_at ? new Date(a.created_at).getTime() : 0
+        const dateB = b.created_at ? new Date(b.created_at).getTime() : 0
+        return dateB - dateA
+      })
+      setCategories(sortedCategories.map((c) => c.label))
+    } catch {
+      // Category may already exist or be auto-created on product save
+    }
+  }
+
+  const purchaseCategoryOptions = Array.from(
+    new Set([...categories, ...TALLY_PURCHASE_CATEGORIES])
+  ).filter((c) => typeof c === "string" && c.trim() !== "")
+
+  const formatPurchaseLineLabel = (line: TallyPurchaseLineItem) =>
+    `${line.stockItemName} - Qty ${formatSaleQuantity(line.quantity)} ${line.tallyUnit} - ₹${line.unitPrice.toLocaleString("en-IN")}`
+
+  const getPurchaseLineActionLabel = (line: TallyPurchaseLineItem) =>
+    line.importAction === "update"
+      ? `Add stock to existing: ${line.matchedProductName || line.stockItemName}`
+      : "Create new product"
+
+  const updatePurchaseLineCategory = (lineIndex: number, category: string) => {
+    setPurchaseImport((prev) => {
+      if (!prev) return prev
+      return {
+        ...prev,
+        lines: prev.lines.map((line) =>
+          line.index === lineIndex ? { ...line, suggestedCategory: category } : line
+        ),
+      }
+    })
+    if (selectedPurchaseLineIndex === lineIndex) {
+      setFormData((prev) => ({ ...prev, category }))
+    }
+  }
+
+  const resolveExistingProductForLine = (line: TallyPurchaseLineItem, catalog = apiProducts): Product | null => {
+    if (line.matchedProductId) {
+      const byId = catalog.find((p) => p.id === line.matchedProductId)
+      if (byId) return byId
+    }
+    return resolvePurchaseLineProduct(line.stockItemName, catalog).product
+  }
+
+  const serialsForPurchaseLine = (line: TallyPurchaseLineItem): string[] => {
+    const needsSerials = isSerialRequiredForDispatch(line.suggestedCategory, line.stockItemName)
+    if (line.serialNumbers.length === 0) return []
+    if (line.serialNumbers.length === line.quantity) return line.serialNumbers
+    // Optional categories: ignore mismatched description text that is not real serials
+    if (!needsSerials) return []
+    return line.serialNumbers
+  }
+
+  const addStockToExistingProduct = async (
+    existing: Product,
+    line: TallyPurchaseLineItem
+  ): Promise<Product> => {
+    // Keep existing product category when adding stock (mixed-category vouchers)
+    const categoryName = (existing.category || line.suggestedCategory).trim()
+    const stockToAdd = line.quantity
+    const serials = serialsForPurchaseLine(line)
+    const existingStock = existing.quantity || existing.central_stock || existing.total_stock || 0
+    let lastUpdated = existing
+    let currentStock = existingStock
+    let remainingToAdd = stockToAdd
+    let serialOffset = 0
+
+    while (remainingToAdd > 0) {
+      const chunk = currentStock > 0 ? Math.min(remainingToAdd, currentStock) : remainingToAdd
+      if (chunk <= 0 && remainingToAdd > 0) {
+        throw new Error(
+          `Cannot add stock to "${line.stockItemName}": try adding in smaller batches from Edit Product`
+        )
+      }
+
+      const batchData: Record<string, unknown> = {
+        stock_to_add: chunk,
+        product_name: existing.name || line.stockItemName,
+        product_category: categoryName,
+      }
+      const chunkSerials = serials.length > 0 ? serials.slice(serialOffset, serialOffset + chunk) : undefined
+      if (chunkSerials?.length) batchData.serial_numbers = chunkSerials
+      if (line.unitPrice > 0) batchData.default_price = line.unitPrice
+
+      lastUpdated = await productsApi.update(existing.id, batchData)
+      remainingToAdd -= chunk
+      serialOffset += chunk
+      currentStock =
+        (lastUpdated as Product & { quantity?: number }).quantity ??
+        lastUpdated.central_stock ??
+        lastUpdated.total_stock ??
+        currentStock + chunk
+    }
+
+    return lastUpdated
+  }
+
+  const purchaseLineToManualDraft = (line: TallyPurchaseLineItem): ManualProductDraft => ({
+    key: `tally-${line.index}-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`,
+    category: line.suggestedCategory,
+    name: line.stockItemName,
+    model: line.modelName || line.stockItemName,
+    wattage: line.wattage,
+    quantity: line.quantity > 0 ? String(line.quantity) : "",
+    unit: line.formUnit || "Quantity",
+    costPrice: line.unitPrice > 0 ? String(line.unitPrice) : "",
+    serialNumbersText: serialsForPurchaseLine(line).join("\n"),
+  })
+
+  const applyPurchaseLinesToManualDrafts = (lines: TallyPurchaseLineItem[]) => {
+    if (!lines.length) return
+    setManualDrafts(lines.map(purchaseLineToManualDraft))
+    setSelectedPurchaseLineIndex(lines[0].index)
+    setError(null)
+  }
+
+  const applyPurchaseLineToForm = (line: TallyPurchaseLineItem) => {
+    applyPurchaseLinesToManualDrafts([line])
+  }
+
+  const handlePurchaseFileChange = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0]
+    if (!file) return
+    setError(null)
+    setPurchaseImportSuccess(null)
+    try {
+      const text = await file.text()
+      const payload = JSON.parse(text)
+      const parsed = parseTallyPurchaseJson(payload, apiProducts, referenceData)
+      setPurchaseImport(parsed)
+      setPurchaseFileName(file.name)
+      const checked: Record<number, boolean> = {}
+      parsed.lines.forEach((line) => {
+        checked[line.index] = true
+      })
+      setPurchaseLineChecked(checked)
+      setSelectedPurchaseLineIndex(0)
+      // Prefill all voucher lines into the multi-product rows
+      applyPurchaseLinesToManualDrafts(parsed.lines)
+    } catch (err: unknown) {
+      setPurchaseImport(null)
+      setPurchaseFileName(null)
+      setError(err instanceof Error ? err.message : "Failed to parse Tally Purchase JSON")
+    } finally {
+      if (purchaseFileInputRef.current) {
+        purchaseFileInputRef.current.value = ""
+      }
+    }
+  }
+
+  const validatePurchaseLine = (line: TallyPurchaseLineItem): string | null => {
+    if (!line.stockItemName.trim()) return "Missing product name"
+    if (!line.suggestedCategory.trim()) {
+      return `"${line.stockItemName}": select a category`
+    }
+    if (line.quantity <= 0) return `"${line.stockItemName}": quantity must be greater than 0`
+    const needsSerials = isSerialRequiredForDispatch(line.suggestedCategory, line.stockItemName)
+    const serials = serialsForPurchaseLine(line)
+    if (needsSerials) {
+      if (serials.length === 0) {
+        return `"${line.stockItemName}" (${line.suggestedCategory}): serial numbers required for Panels/Inverters`
+      }
+      if (serials.length !== line.quantity) {
+        return `"${line.stockItemName}": need ${formatSaleQuantity(line.quantity)} serials, got ${serials.length}`
+      }
+    }
+    return null
+  }
+
+  const saveProductFromPurchaseLine = async (
+    line: TallyPurchaseLineItem,
+    catalog = apiProducts
+  ): Promise<{ product: Product; action: "create" | "update" }> => {
+    const categoryName = line.suggestedCategory.trim()
+    await ensureCategoryExists(categoryName)
+
+    const quantity = line.quantity
+    const serials = serialsForPurchaseLine(line)
+    const validationError = validatePurchaseLine(line)
+    if (validationError) {
+      throw new Error(validationError)
+    }
+
+    const existingProduct = resolveExistingProductForLine(line, catalog)
+    if (existingProduct) {
+      const updated = await addStockToExistingProduct(existingProduct, line)
+      return { product: updated, action: "update" }
+    }
+
+    const productData: any = {
+      name: line.stockItemName,
+      model: (line.modelName || line.stockItemName).trim() || line.stockItemName,
+      category: categoryName,
+      wattage: line.wattage || undefined,
+      quantity,
+      unit: line.formUnit,
+      unit_price: 0,
+      product_name: line.stockItemName,
+      product_category: categoryName,
+    }
+    if (serials.length > 0) {
+      productData.serial_numbers = serials
+    }
+    if (line.unitPrice > 0) {
+      productData.default_price = line.unitPrice
+    }
+    const created = await productsApi.create(productData)
+    return { product: created, action: "create" }
+  }
+
+  const handleApplySelectedPurchaseLine = () => {
+    if (!purchaseImport) return
+    const selected = purchaseImport.lines.filter((line) => purchaseLineChecked[line.index] !== false)
+    applyPurchaseLinesToManualDrafts(selected.length ? selected : purchaseImport.lines.slice(0, 1))
+  }
+
+  const actionSummaryLine = (created: number, updated: number) => {
+    if (created && updated) return `${created} created, ${updated} updated.`
+    if (updated) return "Stock added to existing product."
+    return "New product created."
+  }
+
+  const handleApplyAllPurchaseLines = async () => {
+    if (!purchaseImport) return
+    const linesToApply = purchaseImport.lines.filter((line) => purchaseLineChecked[line.index] !== false)
+    if (!linesToApply.length) {
+      setError("Select at least one line item to apply")
+      return
+    }
+
+    setError(null)
+    setPurchaseImportSuccess(null)
+    setApplyingAllPurchase(true)
+    setPurchaseApplyProgress(null)
+
+    try {
+      let freshProducts = await productsApi.getAll()
+      setApiProducts(freshProducts)
+
+      let createdCount = 0
+      let updatedCount = 0
+      const failures: string[] = []
+
+      for (let i = 0; i < linesToApply.length; i++) {
+        const line = linesToApply[i]
+        const actionLabel = line.importAction === "update" ? "Adding stock" : "Creating"
+        setPurchaseApplyProgress(
+          `${actionLabel} ${i + 1}/${linesToApply.length}: ${line.stockItemName} (${line.suggestedCategory})`
+        )
+        try {
+          const { product: result, action } = await saveProductFromPurchaseLine(line, freshProducts)
+          if (action === "update") updatedCount += 1
+          else {
+            createdCount += 1
+            // Keep catalog fresh so later lines in the same voucher can match newly created products
+            freshProducts = [result, ...freshProducts.filter((p) => p.id !== result.id)]
+            setApiProducts(freshProducts)
+          }
+          onSave(attachUnitToProduct(result, line.formUnit))
+        } catch (lineErr: unknown) {
+          failures.push(
+            formatProductSaveError(lineErr, `Failed: ${line.stockItemName} (${line.suggestedCategory})`)
+          )
+        }
+      }
+
+      const doneCount = createdCount + updatedCount
+      if (doneCount === 0) {
+        setError(failures.join("\n") || "Failed to save imported stock")
+        return
+      }
+
+      const summary =
+        linesToApply.length === 1
+          ? actionSummaryLine(createdCount, updatedCount)
+          : `Imported ${doneCount}/${linesToApply.length} products across categories — ${createdCount} created, ${updatedCount} updated.`
+      setPurchaseImportSuccess(summary)
+      if (failures.length > 0) {
+        setError(`Some lines failed:\n${failures.join("\n")}`)
+      } else {
+        window.setTimeout(() => onClose(), 1200)
+      }
+    } catch (err: unknown) {
+      setError(formatProductSaveError(err, "Failed to save imported stock"))
+    } finally {
+      setApplyingAllPurchase(false)
+      setPurchaseApplyProgress(null)
+    }
+  }
+
+  const updateManualDraft = (key: string, patch: Partial<ManualProductDraft>) => {
+    setManualDrafts((prev) => prev.map((row) => (row.key === key ? { ...row, ...patch } : row)))
+  }
+
+  const addManualDraftRow = () => {
+    setManualDrafts((prev) => [...prev, createEmptyManualDraft()])
+  }
+
+  const removeManualDraftRow = (key: string) => {
+    setManualDrafts((prev) => (prev.length <= 1 ? prev : prev.filter((row) => row.key !== key)))
+  }
+
+  const manualDraftToPurchaseLine = (draft: ManualProductDraft, index: number): TallyPurchaseLineItem => {
+    const name = draft.name.trim()
+    const category = draft.category.trim()
+    const quantity = parseDecimalInput(draft.quantity)
+    const unitPrice = parseDecimalInput(draft.costPrice)
+    const serialNumbers = parseManualSerials(draft.serialNumbersText)
+    const matched = resolvePurchaseLineProduct(name, apiProducts)
+    return {
+      index,
+      stockItemName: name,
+      modelName: draft.model.trim() || name,
+      serialNumbers,
+      quantity,
+      tallyUnit: "NOS",
+      formUnit: draft.unit || "Quantity",
+      unitPrice,
+      lineTotal: quantity * unitPrice,
+      suggestedCategory: matched.product?.category || category,
+      wattage: draft.wattage.trim(),
+      matchedProductId: matched.product?.id || null,
+      matchedProductName: matched.product?.name || null,
+      matchConfidence: matched.confidence,
+      importAction: matched.product ? "update" : "create",
+    }
+  }
+
+  const handleSaveAllManualProducts = async () => {
+    const filled = manualDrafts.filter(
+      (row) => row.name.trim() || row.category.trim() || row.quantity.trim() || row.serialNumbersText.trim()
+    )
+    if (!filled.length) {
+      setError("Add at least one product with a name and category")
+      return
+    }
+
+    setError(null)
+    setPurchaseImportSuccess(null)
+    setSavingManualBatch(true)
+    setManualBatchProgress(null)
+
+    try {
+      let freshProducts = await productsApi.getAll()
+      setApiProducts(freshProducts)
+
+      let createdCount = 0
+      let updatedCount = 0
+      const failures: string[] = []
+
+      for (let i = 0; i < filled.length; i++) {
+        const draft = filled[i]
+        const line = manualDraftToPurchaseLine(draft, i)
+        // Prefer the category the user selected on the row
+        if (draft.category.trim()) {
+          line.suggestedCategory = draft.category.trim()
+        }
+        setManualBatchProgress(
+          `Saving ${i + 1}/${filled.length}: ${line.stockItemName || "product"} (${line.suggestedCategory || "—"})`
+        )
+        try {
+          if (!line.stockItemName) throw new Error(`Row ${i + 1}: product name is required`)
+          if (!line.suggestedCategory) throw new Error(`"${line.stockItemName}": category is required`)
+          const { product: result, action } = await saveProductFromPurchaseLine(line, freshProducts)
+          if (action === "update") updatedCount += 1
+          else {
+            createdCount += 1
+            freshProducts = [result, ...freshProducts.filter((p) => p.id !== result.id)]
+            setApiProducts(freshProducts)
+          }
+          onSave(attachUnitToProduct(result, line.formUnit))
+        } catch (lineErr: unknown) {
+          failures.push(
+            formatProductSaveError(
+              lineErr,
+              `Failed: ${line.stockItemName || `row ${i + 1}`} (${line.suggestedCategory || "no category"})`
+            )
+          )
+        }
+      }
+
+      const doneCount = createdCount + updatedCount
+      if (doneCount === 0) {
+        setError(failures.join("\n") || "Failed to save products")
+        return
+      }
+
+      setPurchaseImportSuccess(
+        `Saved ${doneCount}/${filled.length} products — ${createdCount} created, ${updatedCount} updated with stock.`
+      )
+      if (failures.length > 0) {
+        setError(`Some products failed:\n${failures.join("\n")}`)
+      } else {
+        window.setTimeout(() => onClose(), 1200)
+      }
+    } catch (err: unknown) {
+      setError(formatProductSaveError(err, "Failed to save products"))
+    } finally {
+      setSavingManualBatch(false)
+      setManualBatchProgress(null)
+    }
+  }
 
   // Handle step 2: Create product with serial numbers
   const handleSerialNumbersSubmit = async () => {
@@ -1387,7 +1848,13 @@ export default function ProductModal({ product, onClose, onSave }: ProductModalP
         {error && (
           <div className="mb-6 p-4 bg-red-900/20 border border-red-700 rounded-lg flex items-center gap-2">
             <AlertCircle className="w-5 h-5 text-red-400 flex-shrink-0" />
-            <p className="text-sm text-red-400">{error}</p>
+            <p className="text-sm text-red-400 whitespace-pre-line">{error}</p>
+          </div>
+        )}
+
+        {purchaseImportSuccess && (
+          <div className="mb-6 p-4 bg-emerald-900/20 border border-emerald-700 rounded-lg">
+            <p className="text-sm text-emerald-300">{purchaseImportSuccess}</p>
           </div>
         )}
 
@@ -1925,6 +2392,349 @@ Example: SN001, SN002, SN003"
         ) : (
           // Step 1: Product Details Form
         <form onSubmit={handleSubmit} className="space-y-4">
+          {!product && (
+            <div className="space-y-3">
+              <div className="p-4 bg-slate-900/60 border border-slate-600 rounded-lg space-y-3">
+                <div className="flex items-center gap-2">
+                  <FileJson className="w-5 h-5 text-amber-400 shrink-0" />
+                  <h3 className="text-sm font-medium text-slate-200">Import stock from Tally Purchase JSON</h3>
+                </div>
+                <div className="flex flex-wrap items-center gap-2">
+                  <input
+                    ref={purchaseFileInputRef}
+                    type="file"
+                    accept=".json,application/json"
+                    className="hidden"
+                    onChange={handlePurchaseFileChange}
+                  />
+                  <Button
+                    type="button"
+                    variant="outline"
+                    size="sm"
+                    className="border-slate-600 text-slate-200 hover:bg-slate-700"
+                    onClick={() => purchaseFileInputRef.current?.click()}
+                    disabled={loading || applyingAllPurchase || savingManualBatch}
+                  >
+                    <Upload className="w-4 h-4 mr-2" />
+                    Upload JSON
+                  </Button>
+                  {purchaseFileName && (
+                    <span className="text-xs text-slate-400 truncate max-w-[200px] sm:max-w-none">{purchaseFileName}</span>
+                  )}
+                </div>
+                {purchaseImport && purchaseImport.lines.length > 0 && (
+                  <div className="space-y-2">
+                    <div className="flex flex-col sm:flex-row gap-2">
+                      <select
+                        value={selectedPurchaseLineIndex}
+                        onChange={(e) => {
+                          const idx = Number(e.target.value)
+                          setSelectedPurchaseLineIndex(idx)
+                        }}
+                        className="flex-1 min-w-0 px-3 py-2 bg-slate-700 border border-slate-600 rounded-lg text-white text-sm focus:outline-none focus:border-blue-500"
+                      >
+                        {purchaseImport.lines.map((line) => (
+                          <option key={line.index} value={line.index}>
+                            [{line.suggestedCategory}] {formatPurchaseLineLabel(line)}
+                          </option>
+                        ))}
+                      </select>
+                      <Button
+                        type="button"
+                        size="sm"
+                        className="bg-slate-700 hover:bg-slate-600 text-white shrink-0"
+                        onClick={handleApplySelectedPurchaseLine}
+                        disabled={loading || applyingAllPurchase || savingManualBatch}
+                      >
+                        Apply to rows
+                      </Button>
+                    </div>
+                    <div className="space-y-2 max-h-40 overflow-y-auto pr-1">
+                      {purchaseImport.lines.map((line) => (
+                        <div
+                          key={`purchase-check-${line.index}`}
+                          className="rounded-lg border border-slate-700 bg-slate-800/50 p-2 space-y-1.5"
+                        >
+                          <label className="flex items-start gap-2 text-xs text-slate-300 cursor-pointer">
+                            <Checkbox
+                              checked={purchaseLineChecked[line.index] !== false}
+                              onCheckedChange={(checked) => {
+                                setPurchaseLineChecked((prev) => ({
+                                  ...prev,
+                                  [line.index]: !!checked,
+                                }))
+                              }}
+                              className="mt-0.5 border-slate-500 data-[state=checked]:bg-blue-600"
+                            />
+                            <span className="min-w-0 flex-1">
+                              <span className="block font-medium text-slate-200">{formatPurchaseLineLabel(line)}</span>
+                              <span
+                                className={`block ${
+                                  line.importAction === "update" ? "text-emerald-400/90" : "text-blue-400/90"
+                                }`}
+                              >
+                                {getPurchaseLineActionLabel(line)} · {line.suggestedCategory}
+                              </span>
+                              {line.serialNumbers.length > 0 && (
+                                <span className="block text-slate-500 font-mono truncate">
+                                  Serials: {line.serialNumbers.join(", ")}
+                                </span>
+                              )}
+                            </span>
+                          </label>
+                          <div className="pl-6">
+                            <label className="block text-[11px] text-slate-400 mb-1">Category</label>
+                            <select
+                              value={line.suggestedCategory}
+                              onChange={(e) => updatePurchaseLineCategory(line.index, e.target.value)}
+                              className="w-full px-2 py-1.5 bg-slate-700 border border-slate-600 rounded-md text-white text-xs focus:outline-none focus:border-blue-500"
+                              disabled={loading || applyingAllPurchase || savingManualBatch}
+                            >
+                              {!purchaseCategoryOptions.includes(line.suggestedCategory) &&
+                                line.suggestedCategory && (
+                                  <option value={line.suggestedCategory}>{line.suggestedCategory}</option>
+                                )}
+                              {purchaseCategoryOptions.map((cat) => (
+                                <option key={`${line.index}-${cat}`} value={cat}>
+                                  {cat}
+                                </option>
+                              ))}
+                            </select>
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                    <div className="flex flex-wrap items-center gap-2">
+                      <Button
+                        type="button"
+                        size="sm"
+                        className="bg-blue-600 hover:bg-blue-500 text-white"
+                        onClick={() => void handleApplyAllPurchaseLines()}
+                        disabled={loading || applyingAllPurchase || savingManualBatch}
+                      >
+                        {applyingAllPurchase ? (
+                          <>
+                            <Loader2 className="w-4 h-4 mr-2 animate-spin" />
+                            Importing…
+                          </>
+                        ) : (
+                          "Import all selected"
+                        )}
+                      </Button>
+                      {purchaseApplyProgress && (
+                        <span className="text-xs text-slate-400">{purchaseApplyProgress}</span>
+                      )}
+                    </div>
+                    <p className="text-xs text-slate-400">
+                      {purchaseImport.lines.length} product
+                      {purchaseImport.lines.length === 1 ? "" : "s"} in voucher.
+                      {purchaseImport.reference ? ` Voucher: ${purchaseImport.reference}.` : ""}
+                    </p>
+                  </div>
+                )}
+              </div>
+
+              <div className="p-3 bg-slate-900/60 border border-slate-600 rounded-lg">
+                <p className="text-sm text-slate-200 font-medium">Add products manually</p>
+                <p className="text-xs text-slate-400 mt-1">
+                  Add one or more products below. Each row can be a different category. Existing names get stock
+                  added; new names are created. For Panels/Inverters, enter one serial per quantity (comma or new
+                  line).
+                </p>
+              </div>
+
+              <div className="space-y-3 max-h-[55vh] overflow-y-auto pr-1">
+                {manualDrafts.map((row, rowIndex) => {
+                  const needsSerials = isSerialRequiredForDispatch(row.category, row.name)
+                  return (
+                    <div
+                      key={row.key}
+                      className="p-3 border border-slate-600 rounded-lg bg-slate-800/40 space-y-3"
+                    >
+                      <div className="flex items-center justify-between gap-2">
+                        <span className="text-sm font-medium text-slate-200">Product {rowIndex + 1}</span>
+                        <Button
+                          type="button"
+                          variant="outline"
+                          size="sm"
+                          className="border-slate-600 text-slate-300 hover:bg-slate-700 h-8 px-2"
+                          onClick={() => removeManualDraftRow(row.key)}
+                          disabled={manualDrafts.length <= 1 || savingManualBatch}
+                        >
+                          <Trash2 className="w-4 h-4" />
+                        </Button>
+                      </div>
+
+                      <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                        <div>
+                          <label className="block text-xs text-slate-400 mb-1">Category *</label>
+                          <select
+                            value={row.category}
+                            onChange={(e) => updateManualDraft(row.key, { category: e.target.value })}
+                            className="w-full px-3 py-2 bg-slate-700 border border-slate-600 rounded-lg text-white text-sm focus:outline-none focus:border-blue-500"
+                            disabled={savingManualBatch}
+                          >
+                            <option value="">Select category</option>
+                            {purchaseCategoryOptions.map((cat) => (
+                              <option key={`${row.key}-cat-${cat}`} value={cat}>
+                                {cat}
+                              </option>
+                            ))}
+                          </select>
+                        </div>
+                        <div>
+                          <label className="block text-xs text-slate-400 mb-1">Unit *</label>
+                          <select
+                            value={row.unit}
+                            onChange={(e) => updateManualDraft(row.key, { unit: e.target.value })}
+                            className="w-full px-3 py-2 bg-slate-700 border border-slate-600 rounded-lg text-white text-sm focus:outline-none focus:border-blue-500"
+                            disabled={savingManualBatch}
+                          >
+                            {Array.from(new Set(Object.values(unitDisplayMap))).map((u) => (
+                              <option key={`${row.key}-unit-${u}`} value={u}>
+                                {u}
+                              </option>
+                            ))}
+                          </select>
+                        </div>
+                        <div className="sm:col-span-2">
+                          <label className="block text-xs text-slate-400 mb-1">Product Name *</label>
+                          <input
+                            type="text"
+                            value={row.name}
+                            onChange={(e) => {
+                              const name = e.target.value
+                              updateManualDraft(row.key, {
+                                name,
+                                model: row.model || name,
+                              })
+                            }}
+                            placeholder="e.g., ADANI SOLAR PANEL 545 WATT(DCR)"
+                            className="w-full px-3 py-2 bg-slate-700 border border-slate-600 rounded-lg text-white text-sm placeholder-slate-500 focus:outline-none focus:border-blue-500"
+                            disabled={savingManualBatch}
+                          />
+                        </div>
+                        <div>
+                          <label className="block text-xs text-slate-400 mb-1">Model *</label>
+                          <input
+                            type="text"
+                            value={row.model}
+                            onChange={(e) => updateManualDraft(row.key, { model: e.target.value })}
+                            placeholder="Model"
+                            className="w-full px-3 py-2 bg-slate-700 border border-slate-600 rounded-lg text-white text-sm placeholder-slate-500 focus:outline-none focus:border-blue-500"
+                            disabled={savingManualBatch}
+                          />
+                        </div>
+                        <div>
+                          <label className="block text-xs text-slate-400 mb-1">Wattage</label>
+                          <input
+                            type="text"
+                            value={row.wattage}
+                            onChange={(e) => updateManualDraft(row.key, { wattage: e.target.value })}
+                            placeholder="e.g., 400W"
+                            className="w-full px-3 py-2 bg-slate-700 border border-slate-600 rounded-lg text-white text-sm placeholder-slate-500 focus:outline-none focus:border-blue-500"
+                            disabled={savingManualBatch}
+                          />
+                        </div>
+                        <div>
+                          <label className="block text-xs text-slate-400 mb-1">Quantity *</label>
+                          <input
+                            type="text"
+                            inputMode="decimal"
+                            value={row.quantity}
+                            onChange={(e) =>
+                              updateManualDraft(row.key, { quantity: sanitizeDecimalInput(e.target.value) })
+                            }
+                            placeholder="Enter quantity"
+                            className="w-full px-3 py-2 bg-slate-700 border border-slate-600 rounded-lg text-white text-sm placeholder-slate-500 focus:outline-none focus:border-blue-500"
+                            disabled={savingManualBatch}
+                          />
+                        </div>
+                        <div>
+                          <label className="block text-xs text-slate-400 mb-1">Cost Price (₹)</label>
+                          <input
+                            type="text"
+                            inputMode="decimal"
+                            value={row.costPrice}
+                            onChange={(e) =>
+                              updateManualDraft(row.key, { costPrice: sanitizeDecimalInput(e.target.value) })
+                            }
+                            placeholder="e.g., 25380"
+                            className="w-full px-3 py-2 bg-slate-700 border border-slate-600 rounded-lg text-white text-sm placeholder-slate-500 focus:outline-none focus:border-blue-500"
+                            disabled={savingManualBatch}
+                          />
+                        </div>
+                        <div className="sm:col-span-2">
+                          <label className="block text-xs text-slate-400 mb-1">
+                            Serial numbers{needsSerials ? " *" : " (optional)"}
+                          </label>
+                          <textarea
+                            value={row.serialNumbersText}
+                            onChange={(e) => updateManualDraft(row.key, { serialNumbersText: e.target.value })}
+                            rows={2}
+                            placeholder="One per line or comma-separated"
+                            className="w-full px-3 py-2 bg-slate-700 border border-slate-600 rounded-lg text-white text-sm placeholder-slate-500 focus:outline-none focus:border-blue-500 font-mono"
+                            disabled={savingManualBatch}
+                          />
+                          {needsSerials && (
+                            <p className="text-[11px] text-amber-400 mt-1">
+                              Required for Panels/Inverters — count must match quantity
+                            </p>
+                          )}
+                        </div>
+                      </div>
+                    </div>
+                  )
+                })}
+              </div>
+
+              <div className="flex flex-wrap gap-2">
+                <Button
+                  type="button"
+                  variant="outline"
+                  size="sm"
+                  className="border-slate-600 text-slate-200 hover:bg-slate-700"
+                  onClick={addManualDraftRow}
+                  disabled={savingManualBatch}
+                >
+                  <Plus className="w-4 h-4 mr-1" />
+                  Add another product
+                </Button>
+                <Button
+                  type="button"
+                  variant="outline"
+                  size="sm"
+                  className="border-slate-600 text-slate-300 hover:bg-slate-700"
+                  onClick={onClose}
+                  disabled={savingManualBatch}
+                >
+                  Cancel
+                </Button>
+                <Button
+                  type="button"
+                  size="sm"
+                  className="bg-blue-600 hover:bg-blue-500 text-white"
+                  onClick={() => void handleSaveAllManualProducts()}
+                  disabled={savingManualBatch || loading}
+                >
+                  {savingManualBatch ? (
+                    <>
+                      <Loader2 className="w-4 h-4 mr-2 animate-spin" />
+                      Saving…
+                    </>
+                  ) : (
+                    `Save all products (${manualDrafts.length})`
+                  )}
+                </Button>
+              </div>
+              {manualBatchProgress && (
+                <p className="text-xs text-slate-400">{manualBatchProgress}</p>
+              )}
+            </div>
+          )}
+
+          {product && (
+          <>
           <div className="relative">
             <label className="block text-sm font-medium text-slate-300 mb-2">
               Category * 
@@ -3005,6 +3815,8 @@ Example: SN001, SN002, SN003"
               )}
             </Button>
           </div>
+          </>
+          )}
         </form>
         )}
       </Card>

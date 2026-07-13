@@ -62,6 +62,7 @@ export const usersApi = {
     name: string
     role: string
     is_active?: boolean
+    created_by_id?: string
   }): Promise<User> {
     return apiClient.post<User>("/users", user)
   },
@@ -508,6 +509,8 @@ export const stockRequestsApi = {
     requested_from: "super-admin" | string  // Can be "super-admin" or admin ID for admin-to-admin transfers
     items: StockRequestItem[]
     notes?: string
+    /** Super-admin creating a request for a specific admin */
+    on_behalf_of_admin_id?: string
     billing_address?: {
       line1: string
       line2?: string
@@ -746,6 +749,8 @@ export const salesApi = {
       customer_phone?: string
       notes?: string
       image?: File
+      /** When super-admin creates a sale against a specific admin's stock */
+      admin_id?: string
     }
   ): Promise<Sale> {
     if (sale.image) {

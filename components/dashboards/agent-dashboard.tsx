@@ -3,8 +3,9 @@
 import { useState, useEffect, useMemo } from "react"
 import { Card } from "@/components/ui/card"
 import { Button } from "@/components/ui/button"
-import { Plus, Users, ShoppingCart, CreditCard, TrendingUp, BarChart3, Target, Loader2, RotateCcw, Search, Download, Package, Edit2, Eye } from "lucide-react"
+import { Plus, Users, ShoppingCart, CreditCard, TrendingUp, BarChart3, Target, Loader2, RotateCcw, Search, Download, Package, Edit2, Eye, FileJson } from "lucide-react"
 import SalesModal from "@/components/modals/sales-modal"
+import TallyJsonImportModal from "@/components/modals/tally-json-import-modal"
 import SaleEditModal from "@/components/modals/sale-edit-modal"
 import StockReturnModal from "@/components/modals/stock-return-modal"
 import SerialNumbersViewModal from "@/components/modals/serial-numbers-view-modal"
@@ -15,6 +16,7 @@ import { salesApi, productsApi, quotationsApi, adminInventoryApi, type Quotation
 import { generateQuotationPDF } from "@/lib/quotation-generator"
 import { formatDateISO, unitToFormSelectValue } from "@/lib/utils"
 import type { Sale as ApiSale, Product } from "@/lib/api"
+import type { TallyImportPrefill } from "@/lib/tally-json-import"
 
 // Type alias for Sale from API (which has snake_case properties)
 type Sale = ApiSale & { quotation_id?: string; quotation_status?: string; quotation_final_amount?: number }
@@ -26,6 +28,8 @@ interface AgentDashboardProps {
 export default function AgentDashboard({ userName }: AgentDashboardProps) {
   const sales = useSalesState([])
   const [showSalesModal, setShowSalesModal] = useState(false)
+  const [showTallyImportModal, setShowTallyImportModal] = useState(false)
+  const [salesPrefill, setSalesPrefill] = useState<TallyImportPrefill | null>(null)
   const [showStockReturnModal, setShowStockReturnModal] = useState(false)
   const [saleType, setSaleType] = useState<"b2b" | "b2c" | null>(null)
   const [filterType, setFilterType] = useState<"all" | "B2B" | "B2C">("all")
@@ -474,6 +478,7 @@ export default function AgentDashboard({ userName }: AgentDashboardProps) {
             <Button
               onClick={() => {
                 setSaleType("b2b")
+                setSalesPrefill(null)
                 setShowSalesModal(true)
               }}
               className="bg-blue-600 hover:bg-blue-700 text-white text-xs sm:text-sm py-2 sm:py-2.5"
@@ -485,6 +490,7 @@ export default function AgentDashboard({ userName }: AgentDashboardProps) {
             <Button
               onClick={() => {
                 setSaleType("b2c")
+                setSalesPrefill(null)
                 setShowSalesModal(true)
               }}
               className="bg-cyan-600 hover:bg-cyan-700 text-white text-xs sm:text-sm py-2 sm:py-2.5"
@@ -492,6 +498,15 @@ export default function AgentDashboard({ userName }: AgentDashboardProps) {
               <Plus className="w-3 h-3 sm:w-4 sm:h-4 mr-1.5 sm:mr-2" />
               <span className="hidden xs:inline">New B2C Sale</span>
               <span className="xs:hidden">B2C Sale</span>
+            </Button>
+            <Button
+              onClick={() => setShowTallyImportModal(true)}
+              variant="outline"
+              className="border-amber-600 text-amber-300 hover:bg-amber-950 text-xs sm:text-sm py-2 sm:py-2.5"
+            >
+              <FileJson className="w-3 h-3 sm:w-4 sm:h-4 mr-1.5 sm:mr-2" />
+              <span className="hidden sm:inline">Import Tally JSON</span>
+              <span className="sm:hidden">Tally JSON</span>
             </Button>
           </div>
         </div>
@@ -947,12 +962,27 @@ export default function AgentDashboard({ userName }: AgentDashboardProps) {
       </Tabs>
 
       {/* Modals */}
+      {showTallyImportModal && (
+        <TallyJsonImportModal
+          onClose={() => setShowTallyImportModal(false)}
+          availableProductIds={new Set(Object.keys(availableStockForSales))}
+          onContinue={(prefill, type) => {
+            setShowTallyImportModal(false)
+            setSalesPrefill(prefill)
+            setSaleType(type)
+            setShowSalesModal(true)
+          }}
+        />
+      )}
+
       {showSalesModal && saleType && (
         <SalesModal
           saleType={saleType as "b2b" | "b2c"}
+          prefill={salesPrefill}
           onClose={() => {
             setShowSalesModal(false)
             setSaleType(null)
+            setSalesPrefill(null)
           }}
           onSave={handleCreateSale}
           availableStock={availableStockForSales}
